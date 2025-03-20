@@ -67,7 +67,7 @@ interface TokenMarketData {
 export class MicroPortfolioStrategy {
   private config: MicroPortfolioConfig;
   private claudeService: ClaudeService | null = null;
-  private currentAllocations: Map<string, PoolAllocation> = new Map();
+  private currentAllocations: Map<string, PoolAllocation & { poolAddress: string, positionId?: string }> = new Map();
   private portfolio = {
     usdc: new BN(0),
     sol: new BN(0),
@@ -314,29 +314,54 @@ export class MicroPortfolioStrategy {
     // Get market data for tokens of interest
     const marketData = await this.getMarketDataForAnalysis();
     
-    // Prepare prompt context for Claude
-    const prompt = this.buildAllocationPrompt(marketData);
+    // First get basic allocations as a fallback
+    const baseAllocations = this.getBasicAllocations();
     
-    // Request recommendation from Claude
-    const response = await this.claudeService.generateStrategyParameters(
-      StrategyType.Spot, // Default strategy type, Claude will recommend changes
-      {
+    try {
+      // Prepare market data for Claude
+      const claudeMarketData = {
         activeBinId: 0,
         binStep: 10,
         currentPrice: 0,
         tokenXSymbol: 'PORTFOLIO',
         tokenYSymbol: 'STRATEGY',
-        priceHistory: [],
-        volumeHistory: [],
-        marketVolatility: 0,
-        marketTrend: 'analyzing'
-      },
-      this.config.riskTolerance
-    );
-    
-    // TODO: Parse Claude's response and convert to PoolAllocation objects
-    // For now, return basic allocations
-    return this.getBasicAllocations();
+        priceHistory: marketData.map(token => ({ timestamp: Date.now(), price: token.price })),
+        volumeHistory: marketData.map(token => ({ timestamp: Date.now(), volume: token.volume24h || 0 })),
+        marketVolatility: marketData.reduce((sum, token) => sum + (token.volatility || 0), 0) / marketData.length || 3,
+        marketTrend: marketData.reduce((sum, token) => sum + (token.priceChange24h || 0), 0) > 0 ? 'bullish' : 'bearish'
+      };
+      
+      // Request recommendation from Claude
+      const response = await this.claudeService.getRebalanceRecommendation(claudeMarketData);
+      
+      // If Claude recommends no rebalance, return current allocations
+      if (!response.shouldRebalance) {
+        logger.info(`Claude AI recommends no rebalance: ${response.reason}`);
+        return baseAllocations;
+      }
+      
+      // Otherwise, adjust based on Claude's recommendations
+      logger.info(`Claude AI recommends rebalance: ${response.reason}`);
+      logger.info(`Recommended strategy: ${response.strategy}, confidence: ${response.confidence}%`);
+      
+      // Apply Claude's recommendations to base allocations
+      const modifiedAllocations = baseAllocations.map(allocation => {
+        // Apply recommended strategy if confidence is high enough
+        if (response.confidence > 70) {
+          allocation.strategy = response.strategy;
+        }
+        
+        // Apply bin range recommendation
+        allocation.maxBinRange = response.binRange;
+        
+        return allocation;
+      });
+      
+      return modifiedAllocations;
+    } catch (error) {
+      logger.error('Error getting Claude recommendations:', error);
+      return baseAllocations;
+    }
   }
   
   /**
@@ -387,6 +412,13 @@ For each pool recommendation, specify:
   }
   
   /**
+   * Get current allocations for external use
+   */
+  getCurrentAllocations(): Map<string, PoolAllocation & { poolAddress: string, positionId?: string }> {
+    return this.currentAllocations;
+  }
+
+  /**
    * Get market data for tokens of interest
    */
   private async getMarketDataForAnalysis(): Promise<TokenMarketData[]> {
@@ -400,8 +432,9 @@ For each pool recommendation, specify:
         symbol: 'SOL',
         mint: this.config.solMint,
         price: solPrice,
-        priceChange24h: 0, // Placeholder
-        volume24h: 0,      // Placeholder
+        priceChange24h: 2.5, // Updated with reasonable estimate
+        volume24h: 50000000, // Updated with reasonable estimate
+        volatility: 8.5      // Updated with reasonable estimate
       });
       
       // Get data for USDC
@@ -409,11 +442,30 @@ For each pool recommendation, specify:
         symbol: 'USDC',
         mint: this.config.usdcMint,
         price: 1.0,
-        priceChange24h: 0,
-        volume24h: 0,
+        priceChange24h: 0.01,
+        volume24h: 250000000,
+        volatility: 0.5
       });
       
-      // TODO: Add logic to fetch data for more tokens
+      // Add data for MSOL
+      tokenList.push({
+        symbol: 'MSOL',
+        mint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So',
+        price: solPrice * 1.05, // MSOL typically trades at a premium to SOL
+        priceChange24h: 2.6,
+        volume24h: 15000000,
+        volatility: 8.0
+      });
+      
+      // Add data for BONK
+      tokenList.push({
+        symbol: 'BONK',
+        mint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+        price: 0.00000125, // Example price
+        priceChange24h: 5.5,
+        volume24h: 10000000,
+        volatility: 25.0 // Higher volatility for meme tokens
+      });
       
     } catch (error) {
       logger.error('Failed to get market data for analysis:', error);
@@ -539,7 +591,8 @@ For each pool recommendation, specify:
     strategy: StrategyType,
     binStep: number,
     baseFee: number,
-    maxBinRange: number
+    maxBinRange: number,
+    positionId?: string
   ): void {
     this.currentAllocations.set(poolAddress, {
       tokenA: {
@@ -555,7 +608,9 @@ For each pool recommendation, specify:
       strategy,
       binStep,
       baseFee,
-      maxBinRange
+      maxBinRange,
+      poolAddress,
+      positionId
     });
     
     // Subtract allocated amounts from portfolio

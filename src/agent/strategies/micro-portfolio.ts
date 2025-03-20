@@ -201,21 +201,31 @@ export class MicroPortfolioAgent {
     feePercentage: number
   ): Promise<DLMM | null> {
     try {
-      // In a real implementation, search for existing pool with these tokens
-      // If not found, create a new one
-      
-      // For now, we'll assume we need to create a new pool
-      // This would be replaced with actual implementation that interacts with Meteora
+      // Configure agent to use this token pair
+      this.agent.setStrategy(StrategyType.Spot); // Default strategy for pool creation
       
       logger.info(`Creating new DLMM pool: ${tokenXMint.toString()} / ${tokenYMint.toString()}`);
       logger.info(`Bin step: ${binStep}, Fee percentage: ${feePercentage/100}%`);
       
-      // Placeholder for pool creation
-      // In a production environment, this would call the agent's createPool method
+      // Create the pool using the agent's built-in method
+      const poolAddress = await this.agent.createPoolWithParameters(
+        tokenXMint,
+        tokenYMint,
+        binStep,
+        8388608, // Default active ID
+        feePercentage
+      );
       
-      // For now, return null to indicate failure
-      // In a real implementation, return the created or found pool
-      return null;
+      // Initialize the pool object
+      this.agent.setPoolAddress(poolAddress);
+      const pool = await this.agent.getPool();
+      
+      if (!pool) {
+        throw new Error('Failed to get pool after creation');
+      }
+      
+      logger.info(`Successfully created pool: ${poolAddress.toString()}`);
+      return pool;
     } catch (error) {
       logger.error('Error finding or creating pool:', error);
       return null;
@@ -236,8 +246,10 @@ export class MicroPortfolioAgent {
       logger.info(`Adding liquidity to pool: ${pool.lbPair.publicKey.toString()}`);
       logger.info(`X: ${amountX.toString()}, Y: ${amountY.toString()}, Strategy: ${strategyType}, Bin range: ${binRange}`);
       
-      // Placeholder for adding liquidity
-      // In a production environment, this would call the agent's addLiquidity method
+      // Configure agent for this pool and strategy
+      this.agent.setPoolAddress(pool.lbPair.publicKey);
+      this.agent.setStrategy(strategyType);
+      this.agent.setBinRange(binRange);
       
       // Get active bin
       const activeBin = await pool.getActiveBin();
@@ -249,7 +261,9 @@ export class MicroPortfolioAgent {
       
       logger.info(`Using bin range: ${minBinId} to ${maxBinId}`);
       
-      // In a real implementation, execute the transaction to add liquidity
+      // Execute the transaction to add liquidity
+      const txSignature = await this.agent.addLiquidity(amountX, amountY);
+      logger.info(`Added liquidity successfully: ${txSignature}`);
       
     } catch (error) {
       logger.error('Error adding liquidity to pool:', error);
@@ -266,18 +280,99 @@ export class MicroPortfolioAgent {
       // Get new recommended allocations
       const newAllocations = await this.strategy.getRecommendedAllocations();
       
-      // In a real implementation:
-      // 1. Compare current allocations to new recommendations
-      // 2. Remove liquidity from pools that are no longer recommended
-      // 3. Add liquidity to new recommended pools
-      // 4. Adjust liquidity in existing pools
+      // Get current allocations from the strategy
+      const currentPools = [...this.strategy.getCurrentAllocations().values()];
       
-      // For now, log what we would do
+      // For each current pool, check if it's still recommended
+      for (const currentPool of currentPools) {
+        const poolAddress = currentPool.poolAddress;
+        const isStillRecommended = newAllocations.some(allocation => 
+          allocation.tokenA.mint === currentPool.tokenA.mint && 
+          allocation.tokenB.mint === currentPool.tokenB.mint);
+          
+        if (!isStillRecommended) {
+          // Remove liquidity from this pool
+          logger.info(`Removing liquidity from pool ${poolAddress} (${currentPool.tokenA.symbol}/${currentPool.tokenB.symbol})`);
+          
+          try {
+            this.agent.setPoolAddress(new PublicKey(poolAddress));
+            await this.agent.removeLiquidity(currentPool.positionId);
+            this.strategy.removeAllocation(poolAddress);
+            logger.info(`Successfully removed liquidity from pool ${poolAddress}`);
+          } catch (error) {
+            logger.error(`Error removing liquidity from pool ${poolAddress}:`, error);
+          }
+        }
+      }
+      
+      // For each new allocation, add or adjust liquidity
       for (const allocation of newAllocations) {
-        logger.info(`Would allocate to ${allocation.tokenA.symbol}/${allocation.tokenB.symbol}:`);
-        logger.info(`  - Strategy: ${allocation.strategy}`);
-        logger.info(`  - Amounts: ${allocation.tokenA.amount.toString()} ${allocation.tokenA.symbol}, ${allocation.tokenB.amount.toString()} ${allocation.tokenB.symbol}`);
-        logger.info(`  - Bin step: ${allocation.binStep}, Base fee: ${allocation.baseFee}, Bin range: ${allocation.maxBinRange}`);
+        const existingPool = currentPools.find(pool => 
+          pool.tokenA.mint === allocation.tokenA.mint && 
+          pool.tokenB.mint === allocation.tokenB.mint);
+          
+        if (existingPool) {
+          // Adjust existing position if needed
+          logger.info(`Adjusting liquidity in ${allocation.tokenA.symbol}/${allocation.tokenB.symbol} pool`);
+          logger.info(`Strategy: ${allocation.strategy}, Bin range: ${allocation.maxBinRange}`);
+          
+          try {
+            this.agent.setPoolAddress(new PublicKey(existingPool.poolAddress));
+            this.agent.setStrategy(allocation.strategy);
+            this.agent.setBinRange(allocation.maxBinRange);
+            
+            // Check if rebalance is needed based on price movement
+            if (await this.agent.shouldRebalance()) {
+              await this.agent.rebalance();
+              logger.info(`Successfully rebalanced position in ${existingPool.poolAddress}`);
+            } else {
+              logger.info(`No rebalance needed for ${existingPool.poolAddress}`);
+            }
+          } catch (error) {
+            logger.error(`Error adjusting position in pool ${existingPool.poolAddress}:`, error);
+          }
+        } else {
+          // Create new pool and position
+          logger.info(`Creating new position for ${allocation.tokenA.symbol}/${allocation.tokenB.symbol}`);
+          
+          try {
+            // Create the pool if it doesn't exist
+            const pool = await this.findOrCreatePool(
+              new PublicKey(allocation.tokenA.mint),
+              new PublicKey(allocation.tokenB.mint),
+              allocation.binStep,
+              allocation.baseFee
+            );
+            
+            if (pool) {
+              // Add liquidity
+              await this.addLiquidityToPool(
+                pool,
+                allocation.tokenA.amount,
+                allocation.tokenB.amount,
+                allocation.strategy,
+                allocation.maxBinRange
+              );
+              
+              // Update allocations
+              this.strategy.updateAllocations(
+                pool.lbPair.publicKey.toString(),
+                allocation.tokenA.mint,
+                allocation.tokenA.amount,
+                allocation.tokenA.symbol,
+                allocation.tokenB.mint,
+                allocation.tokenB.amount,
+                allocation.tokenB.symbol,
+                allocation.strategy,
+                allocation.binStep,
+                allocation.baseFee,
+                allocation.maxBinRange
+              );
+            }
+          } catch (error) {
+            logger.error(`Error creating new position for ${allocation.tokenA.symbol}/${allocation.tokenB.symbol}:`, error);
+          }
+        }
       }
       
       // Update last rebalance check time
@@ -295,57 +390,59 @@ export class MicroPortfolioAgent {
     try {
       logger.info('Collecting fees from all pools');
       
-      // In a real implementation:
-      // 1. Iterate through all current pools
-      // 2. Collect fees from each pool
-      // 3. Add collected fees to portfolio
-      // 4. Reinvest according to strategy
+      // Get current allocations from the strategy
+      const currentPools = [...this.strategy.getCurrentAllocations().values()];
       
-      // For now, just update the last fees collected time
+      let totalFeesCollectedValueUsd = 0;
+      
+      // Iterate through all current pools
+      for (const poolData of currentPools) {
+        try {
+          const poolAddress = poolData.poolAddress;
+          logger.info(`Collecting fees from pool ${poolAddress} (${poolData.tokenA.symbol}/${poolData.tokenB.symbol})`);
+          
+          // Set the pool in the agent
+          this.agent.setPoolAddress(new PublicKey(poolAddress));
+          
+          // Collect fees
+          const result = await this.agent.collectFees();
+          
+          if (result?.feeAmountX && result?.feeAmountY) {
+            // Process the collected fees
+            this.strategy.processFees(
+              poolAddress,
+              result.feeAmountX,
+              result.feeAmountY,
+              poolData.tokenA.mint,
+              poolData.tokenB.mint
+            );
+            
+            // Calculate value in USD
+            // (simplified, in a real implementation would use actual token prices)
+            const feeValueUsd = 0; // Placeholder
+            totalFeesCollectedValueUsd += feeValueUsd;
+            
+            logger.info(`Collected fees from pool ${poolAddress}: ${result.feeAmountX.toString()} ${poolData.tokenA.symbol}, ${result.feeAmountY.toString()} ${poolData.tokenB.symbol}`);
+          }
+        } catch (error) {
+          logger.error(`Error collecting fees from pool ${poolData.poolAddress}:`, error);
+        }
+      }
+      
+      // Update the last fees collected time
       this.lastFeesCollected = Date.now();
+      
+      // Reinvest the collected fees if enough value was collected
+      if (totalFeesCollectedValueUsd > 1) { // If more than $1 in fees
+        logger.info(`Reinvesting collected fees worth $${totalFeesCollectedValueUsd.toFixed(2)}`);
+        await this.rebalancePools(); // Rebalance to reinvest
+      }
       
     } catch (error) {
       logger.error('Error collecting and compounding fees:', error);
     }
   }
   
-  /**
-   * Calculate optimal bin range based on token volatility
-   */
-  private calculateOptimalBinRange(
-    tokenVolatility: number,
-    binStep: number,
-    riskTolerance: 'low' | 'medium' | 'high'
-  ): number {
-    // Higher volatility or smaller bin steps require wider ranges
-    let multiplier: number;
-    
-    switch (riskTolerance) {
-      case 'low':
-        multiplier = 0.8;
-        break;
-      case 'medium':
-        multiplier = 1.0;
-        break;
-      case 'high':
-        multiplier = 1.5;
-        break;
-      default:
-        multiplier = 1.0;
-    }
-    
-    const volatilityDecimal = tokenVolatility / 100;
-    const binsNeeded = Math.ceil(volatilityDecimal * 100 / binStep * multiplier);
-    
-    // Ensure a minimum number of bins based on risk tolerance
-    const minBins = {
-      'low': 10,
-      'medium': 5,
-      'high': 3
-    };
-    
-    return Math.max(minBins[riskTolerance], binsNeeded);
-  }
 }
 
 export default MicroPortfolioAgent;

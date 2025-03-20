@@ -5,8 +5,6 @@
  * and emergency shutdown procedures.
  */
 
-import { BN } from '@coral-xyz/anchor';
-import { Connection, PublicKey } from '@solana/web3.js';
 import { logger } from './logger';
 
 interface SafetyConfig {
