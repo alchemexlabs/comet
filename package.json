@@ -18,6 +18,7 @@
     "start-server": "bun src/server/index.ts",
     "start-agent": "bun src/agent/server.ts",
     "start-agent-cli": "bun src/agent/cli.ts",
+    "start-comet-agent": "bun -r dotenv/config src/agent/cli-agent.ts",
     "test-real-money": "bun -r dotenv/config src/examples/test_real_money.ts"
   },
   "devDependencies": {

@@ -179,6 +179,231 @@ export class ClaudeService {
       };
     }
   }
+  
+  /**
+   * Generate market analysis for a token
+   */
+  async generateMarketAnalysis(
+    tokenSymbol: string,
+    currentPrice: number
+  ): Promise<string> {
+    try {
+      logger.info(`Requesting market analysis for ${tokenSymbol}`);
+      
+      // Apply rate limiting to Claude API calls
+      const response = await rateLimiter.limit('claude:api', async () => {
+        return this.client.messages.create({
+          model: this.config.model,
+          max_tokens: this.config.maxTokens,
+          temperature: this.config.temperature,
+          system: `You are an expert crypto market analyst specialized in Solana tokens.
+          
+Your task is to provide a concise but insightful market analysis for a specific token.
+
+Your response should include:
+1. Current market sentiment and trend
+2. Key price levels to watch
+3. Recent developments affecting the token (if known)
+4. A short-term outlook (1-7 days)
+5. Risks and opportunities
+
+Keep your analysis practical, data-driven, and focused on information that would be useful for a liquidity provider.
+Avoid making specific price predictions, and acknowledge limitations in your information.`,
+          messages: [
+            {
+              role: "user",
+              content: `Please provide a market analysis for ${tokenSymbol}.
+              
+Current price: $${currentPrice}
+
+What's your assessment of the current market conditions for this token and the key factors a liquidity provider should consider?`
+            }
+          ]
+        });
+      });
+      
+      // Return the text response
+      return response.content[0].text;
+    } catch (error) {
+      logger.error('Error generating market analysis with Claude:', error);
+      return 'Unable to generate market analysis at this time. Please try again later.';
+    }
+  }
+  
+  /**
+   * Generate pool analysis for a token pair
+   */
+  async generatePoolAnalysis(
+    tokenX: string,
+    tokenY: string,
+    currentPrice: number,
+    binStep: number
+  ): Promise<string> {
+    try {
+      logger.info(`Requesting pool analysis for ${tokenX}/${tokenY}`);
+      
+      // Apply rate limiting to Claude API calls
+      const response = await rateLimiter.limit('claude:api', async () => {
+        return this.client.messages.create({
+          model: this.config.model,
+          max_tokens: this.config.maxTokens,
+          temperature: this.config.temperature,
+          system: `You are an expert in automated market making and liquidity provision strategies for Meteora DLMM pools.
+          
+Your task is to analyze a specific pool and provide optimization recommendations.
+
+For context:
+- DLMM (Dynamic Liquidity Market Maker) pools use discrete price bins
+- Each bin represents a specific price level
+- Bin step determines the price difference between adjacent bins
+- Liquidity can be concentrated around specific price ranges
+- Different strategies (Spot, BidAsk, Curve) distribute liquidity differently
+
+Your analysis should include:
+1. Optimal bin range recommendations based on the token pair
+2. Strategy recommendations (Spot, BidAsk, or Curve)
+3. Fee optimization suggestions
+4. Rebalancing frequency recommendations
+5. Risk management considerations`,
+          messages: [
+            {
+              role: "user",
+              content: `Please analyze the following pool and provide optimization recommendations:
+              
+Token Pair: ${tokenX}/${tokenY}
+Current Price: $${currentPrice}
+Bin Step: ${binStep}%
+
+How can I optimize my liquidity provision strategy for this pool?`
+            }
+          ]
+        });
+      });
+      
+      // Return the text response
+      return response.content[0].text;
+    } catch (error) {
+      logger.error('Error generating pool analysis with Claude:', error);
+      return 'Unable to generate pool analysis at this time. Please try again later.';
+    }
+  }
+  
+  /**
+   * Generate strategy analysis for simulations
+   */
+  async generateStrategyAnalysis(
+    strategy: string,
+    initialAmount: number,
+    days: number,
+    finalAmount: number
+  ): Promise<string> {
+    try {
+      logger.info(`Requesting strategy analysis for ${strategy}`);
+      
+      // Apply rate limiting to Claude API calls
+      const response = await rateLimiter.limit('claude:api', async () => {
+        return this.client.messages.create({
+          model: this.config.model,
+          max_tokens: this.config.maxTokens,
+          temperature: this.config.temperature,
+          system: `You are an expert in DeFi liquidity provision strategies and performance analysis.
+          
+Your task is to analyze a strategy simulation and provide insights.
+
+For context:
+- Strategies include Spot (even distribution), BidAsk (concentrated at active bin), and Curve (normal distribution)
+- Different market conditions favor different strategies
+- Returns are affected by volatility, trading volume, and price trends
+- Risk varies by strategy and market conditions
+
+Your analysis should include:
+1. Key strengths and weaknesses of the strategy
+2. Market conditions where this strategy excels
+3. Risk assessment
+4. Comparison to alternative strategies
+5. Optimization suggestions`,
+          messages: [
+            {
+              role: "user",
+              content: `Please analyze the following strategy simulation results:
+              
+Strategy: ${strategy}
+Initial Investment: $${initialAmount.toFixed(2)}
+Time Period: ${days} days
+Final Value: $${finalAmount.toFixed(2)}
+Profit: $${(finalAmount - initialAmount).toFixed(2)} (${(((finalAmount / initialAmount) - 1) * 100).toFixed(2)}%)
+Annualized Return: ${(((finalAmount / initialAmount) - 1) * 100 * 365 / days).toFixed(2)}%
+
+What insights can you provide about this strategy based on these results?`
+            }
+          ]
+        });
+      });
+      
+      // Return the text response
+      return response.content[0].text;
+    } catch (error) {
+      logger.error('Error generating strategy analysis with Claude:', error);
+      return 'Unable to generate strategy analysis at this time. Please try again later.';
+    }
+  }
+  
+  /**
+   * Generate agent response for CLI
+   */
+  async generateAgentResponse(
+    userQuery: string,
+    contextInfo: string
+  ): Promise<string> {
+    try {
+      logger.info('Generating agent response for user query');
+      
+      // Apply rate limiting to Claude API calls
+      const response = await rateLimiter.limit('claude:api', async () => {
+        return this.client.messages.create({
+          model: this.config.model,
+          max_tokens: this.config.maxTokens,
+          temperature: this.config.temperature,
+          system: `You are Comet, an intelligent autonomous liquidity agent assistant for DeFi on Solana.
+          
+Your primary purpose is to help users:
+1. Understand their liquidity positions and portfolio
+2. Provide market insights and analysis
+3. Make recommendations to optimize strategies
+4. Explain DeFi and DLMM concepts
+5. Assist with making informed decisions about liquidity provision
+
+Keep your responses:
+- Concise but informative
+- Practical and actionable
+- Focused on the user's question
+- Balanced in terms of opportunities and risks
+
+You have access to information about the user's current portfolio, positions, and market data.
+Base your responses on this information when available, but be transparent about what you don't know.
+
+When discussing returns or performance, always acknowledge the inherent risks of DeFi.
+Avoid making specific price predictions or promises of returns.`,
+          messages: [
+            {
+              role: "user",
+              content: `Here's information about my current state:
+
+${contextInfo}
+
+My question is: ${userQuery}`
+            }
+          ]
+        });
+      });
+      
+      // Return the text response
+      return response.content[0].text;
+    } catch (error) {
+      logger.error('Error generating agent response with Claude:', error);
+      return 'I apologize, but I\'m having trouble processing your request at the moment. Please try again later or use one of the specific commands listed in /help.';
+    }
+  }
 
   /**
    * Build prompt for market analysis
