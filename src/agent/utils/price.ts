@@ -8,9 +8,10 @@ import { logger } from './logger';
 import { retry } from './helpers';
 import { rateLimiter } from './rate-limiter';
 
-// Birdeye API base URL
+// API URLs and keys
 const BIRDEYE_API_URL = process.env.BIRDEYE_API_URL || 'https://public-api.birdeye.so';
 const BIRDEYE_API_KEY = process.env.BIRDEYE_API_KEY || '';
+const JUPITER_API_URL = process.env.JUPITER_API_URL || 'https://price.jup.ag/v4';
 
 /**
  * Get token price from Birdeye API
@@ -180,4 +181,174 @@ export function isRebalanceNeeded(
   const percentageDiff = (priceDiff / targetPrice) * 100;
   
   return percentageDiff > threshold;
+}
+
+/**
+ * Get token price from Jupiter API
+ * 
+ * @param tokenMint - Token mint address
+ * @param fallbackPrice - Optional fallback price if API call fails
+ * @returns Token price in USD
+ */
+export async function getPriceFromJupiter(
+  tokenMint: string | PublicKey,
+  fallbackPrice?: number
+): Promise<number> {
+  try {
+    // Validate the mint address
+    if (!tokenMint) {
+      throw new Error('Token mint address is required');
+    }
+    
+    const mintAddress = tokenMint instanceof PublicKey ? tokenMint.toString() : tokenMint;
+    
+    // Validate mint address format
+    try {
+      new PublicKey(mintAddress);
+    } catch (e) {
+      throw new Error(`Invalid token mint address format: ${mintAddress}`);
+    }
+    
+    // Make request to Jupiter API with rate limiting and retries
+    const response = await rateLimiter.limit('jupiter:api', () => 
+      retry(
+        () => axios.get(
+          `${JUPITER_API_URL}/price?ids=${mintAddress}`,
+          {
+            timeout: 5000, // 5 second timeout
+          }
+        ),
+        3, // 3 retries
+        1000, // 1 second initial delay
+        (error, attempt) => {
+          logger.warn(`Jupiter API request attempt ${attempt} failed: ${error.message}`);
+        }
+      )
+    );
+    
+    // Extract price from response with validation
+    if (!response.data || typeof response.data !== 'object') {
+      throw new Error('Invalid response from Jupiter API');
+    }
+    
+    const price = response.data?.data?.[mintAddress]?.price;
+    
+    // Validate price
+    if (price === undefined || price === null || isNaN(price)) {
+      if (fallbackPrice !== undefined) {
+        logger.warn(`Invalid price from Jupiter for ${mintAddress}, using fallback: ${fallbackPrice}`);
+        return fallbackPrice;
+      }
+      throw new Error(`Invalid price data for token ${mintAddress}`);
+    }
+    
+    logger.debug(`Jupiter price for ${mintAddress}: ${price}`);
+    return price;
+  } catch (error) {
+    logger.error(`Failed to get price from Jupiter: ${error.message}`);
+    
+    // Use fallback price if provided
+    if (fallbackPrice !== undefined) {
+      logger.info(`Using fallback price after error: ${fallbackPrice}`);
+      return fallbackPrice;
+    }
+    
+    throw new Error(`Failed to get price: ${error.message}`);
+  }
+}
+
+/**
+ * Get multiple token prices from Jupiter API
+ * 
+ * @param tokenMints - Array of token mint addresses
+ * @returns Map of token address to price
+ */
+export async function getMultipleTokenPricesFromJupiter(
+  tokenMints: (string | PublicKey)[]
+): Promise<Map<string, number>> {
+  try {
+    const addresses = tokenMints.map(mint => 
+      mint instanceof PublicKey ? mint.toString() : mint
+    ).join(',');
+    
+    // Make request to Jupiter API with rate limiting
+    const response = await rateLimiter.limit('jupiter:api', () => 
+      retry(() => axios.get(
+        `${JUPITER_API_URL}/price?ids=${addresses}`,
+        {
+          timeout: 5000, // 5 second timeout
+        }
+      ))
+    );
+    
+    // Process response
+    const priceMap = new Map<string, number>();
+    const data = response.data?.data || {};
+    
+    for (const [address, info] of Object.entries(data)) {
+      priceMap.set(address, info.price || 0);
+    }
+    
+    return priceMap;
+  } catch (error) {
+    logger.error(`Failed to get multiple prices from Jupiter: ${error.message}`);
+    throw new Error(`Failed to get multiple prices from Jupiter: ${error.message}`);
+  }
+}
+
+/**
+ * Get the most accurate price by comparing Jupiter and Birdeye
+ * Jupiter is preferred for accuracy since it's not high frequency
+ * Falls back to Birdeye if Jupiter fails
+ * 
+ * @param tokenMint - Token mint address
+ * @param fallbackPrice - Optional fallback price if both APIs fail
+ * @returns Token price in USD
+ */
+export async function getBestPrice(
+  tokenMint: string | PublicKey,
+  fallbackPrice?: number
+): Promise<number> {
+  try {
+    // Try Jupiter first as it's more accurate for our use case
+    return await getPriceFromJupiter(tokenMint, undefined);
+  } catch (jupiterError) {
+    logger.warn(`Jupiter price fetch failed, falling back to Birdeye: ${jupiterError.message}`);
+    
+    try {
+      // Fall back to Birdeye if Jupiter fails
+      return await getPriceFromBirdeye(tokenMint, fallbackPrice);
+    } catch (birdeyeError) {
+      logger.error(`All price sources failed for ${tokenMint}`);
+      
+      if (fallbackPrice !== undefined) {
+        logger.info(`Using fallback price: ${fallbackPrice}`);
+        return fallbackPrice;
+      }
+      
+      throw new Error(`Failed to get price from all sources for ${tokenMint}`);
+    }
+  }
+}
+
+/**
+ * Get multiple token prices from the best available source
+ * Jupiter is preferred for accuracy since it's not high frequency
+ * Falls back to Birdeye if Jupiter fails
+ * 
+ * @param tokenMints - Array of token mint addresses
+ * @returns Map of token address to price
+ */
+export async function getBestMultipleTokenPrices(
+  tokenMints: (string | PublicKey)[]
+): Promise<Map<string, number>> {
+  try {
+    // Try Jupiter first
+    return await getMultipleTokenPricesFromJupiter(tokenMints);
+  } catch (jupiterError) {
+    logger.warn(`Jupiter multiple prices fetch failed, falling back to Birdeye: ${jupiterError.message}`);
+    
+    // Fall back to Birdeye
+    return await getMultipleTokenPrices(tokenMints);
+  }
 }

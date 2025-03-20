@@ -36,6 +36,7 @@ RPC_URL=https://api.helius.xyz/v0/solanaqt
 HELIUS_API_KEY=your_helius_api_key
 BIRDEYE_API_KEY=your_birdeye_api_key
 BIRDEYE_API_URL=https://public-api.birdeye.so
+JUPITER_API_URL=https://price.jup.ag/v4
 
 # Wallet Configuration
 COMET_WALLET_KEY=your_wallet_private_key
@@ -98,6 +99,7 @@ Comet implements automatic rate limiting for all external API calls to respect s
 - **GetProgramAccounts**: 25 requests per second
 - **Helius Enhanced API**: 10 requests per second
 - **Birdeye API**: 10 requests per second
+- **Jupiter API**: 50 requests per second
 - **Claude AI API**: 1 request per 10 seconds
 
 These limits can be customized through environment variables:
@@ -108,6 +110,7 @@ RATE_LIMIT_HELIUS_SEND_TX=5
 RATE_LIMIT_HELIUS_PROGRAM_ACCTS=25
 RATE_LIMIT_HELIUS_API=10
 RATE_LIMIT_BIRDEYE_API=10
+RATE_LIMIT_JUPITER_API=50
 RATE_LIMIT_CLAUDE_API=1
 RATE_LIMIT_CLAUDE_PERIOD=10000
 ```

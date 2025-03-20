@@ -62,6 +62,12 @@ export const API_RATE_LIMITS: Record<string, RateLimitConfig> = {
     period: parseInt(process.env.RATE_LIMIT_CLAUDE_PERIOD || '10000')
   },
   
+  // Jupiter API rate limits
+  'jupiter:api': { 
+    requests: parseInt(process.env.RATE_LIMIT_JUPITER_API || '50'), 
+    period: 1000 
+  },
+  
   // Default rate limiter for other services
   'default': { requests: 5, period: 1000 }
 };
