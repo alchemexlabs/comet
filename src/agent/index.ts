@@ -14,6 +14,7 @@ import { loadWalletFromKey, sleep } from './utils/helpers';
 import { getPriceFromBirdeye } from './utils/price';
 import { logger } from './utils/logger';
 import { ClaudeService } from './utils/claude';
+import MicroPortfolioAgent from './strategies/micro-portfolio';
 import { 
   initializeDatabase, 
   registerAgent, 
@@ -35,6 +36,7 @@ export class Comet {
   private claudeService: ClaudeService | null = null;
   private priceHistory: Array<{timestamp: number, price: number}> = [];
   private volumeHistory: Array<{timestamp: number, volume: number}> = [];
+  private microPortfolioAgent: MicroPortfolioAgent | null = null;
 
   constructor(config: CometConfig) {
     this.config = config;
@@ -53,6 +55,31 @@ export class Comet {
         logger.info('Claude AI service initialized');
       } catch (error) {
         logger.error('Failed to initialize Claude AI service', error);
+      }
+    }
+    
+    // Initialize MicroPortfolio strategy if specified
+    if (config.strategy?.toLowerCase() === 'microportfolio') {
+      try {
+        this.microPortfolioAgent = new MicroPortfolioAgent(this, {
+          initialCapital: {
+            usdc: config.microPortfolio?.initialCapital?.usdc || 100_000_000, // $100 USDC (100 million native units)
+            sol: config.microPortfolio?.initialCapital?.sol || 1_000_000_000,  // 1 SOL (1 billion native units)
+          },
+          riskTolerance: config.microPortfolio?.riskTolerance || 'medium',
+          maxAllocationPerPool: config.microPortfolio?.maxAllocationPerPool || 50,
+          rebalanceThreshold: config.microPortfolio?.rebalanceThreshold || 5,
+          compoundInterval: config.microPortfolio?.compoundInterval || 24 * 60 * 60 * 1000,
+          weekendSafetyEnabled: config.microPortfolio?.weekendSafetyEnabled,
+          claude: {
+            enabled: config.claude?.enabled || false,
+            apiKey: config.claude?.apiKey || '',
+            model: config.claude?.model || 'claude-3-sonnet-20240229'
+          }
+        });
+        logger.info('MicroPortfolio strategy initialized');
+      } catch (error) {
+        logger.error('Failed to initialize MicroPortfolio strategy', error);
       }
     }
   }
@@ -541,81 +568,89 @@ export class Comet {
       await this.initialize();
       this.isRunning = true;
       logger.info('Comet agent started');
-
-      // Main loop
-      while (this.isRunning) {
-        try {
-          // Refresh DLMM state
-          if (this.dlmm) {
-            try {
-              await this.dlmm.refetchStates();
-              
-              // Update price history
-              const activeBin = await this.dlmm.getActiveBin();
-              const currentPrice = parseFloat(activeBin.price);
-              
-              this.priceHistory.push({
-                timestamp: Date.now(),
-                price: currentPrice
-              });
-              
-              // Limit history length to last 100 data points
-              if (this.priceHistory.length > 100) {
-                this.priceHistory = this.priceHistory.slice(-100);
-              }
-              
-              // Update volume history (placeholder - would need actual volume data)
-              // In a production system, you would fetch real volume data
-              const estimatedVolume = Math.random() * 10000; // Placeholder for demo
-              
-              this.volumeHistory.push({
-                timestamp: Date.now(),
-                volume: estimatedVolume
-              });
-              
-              // Limit history length to last 100 data points
-              if (this.volumeHistory.length > 100) {
-                this.volumeHistory = this.volumeHistory.slice(-100);
-              }
-            } catch (refreshError) {
-              logger.error('Failed to refresh DLMM state, will retry next cycle:', refreshError);
-              // Continue to next iteration rather than failing the entire agent
-              await sleep(this.config.pollingInterval || 60000);
-              continue;
-            }
-          }
-
-          // Check if rebalance is needed
+      
+      // Start MicroPortfolio strategy if configured
+      if (this.config.strategy?.toLowerCase() === 'microportfolio' && this.microPortfolioAgent) {
+        logger.info('Starting MicroPortfolio strategy');
+        await this.microPortfolioAgent.start();
+      } else {
+        logger.info('Starting standard liquidity provision strategy');
+        
+        // Main loop for standard strategy
+        while (this.isRunning) {
           try {
-            const shouldRebalanceNow = await this.shouldRebalance();
-            if (shouldRebalanceNow) {
+            // Refresh DLMM state
+            if (this.dlmm) {
               try {
-                await this.rebalance();
-              } catch (rebalanceError) {
-                logger.error('Rebalance operation failed:', rebalanceError);
-                // Don't throw, continue with the next operation
+                await this.dlmm.refetchStates();
+                
+                // Update price history
+                const activeBin = await this.dlmm.getActiveBin();
+                const currentPrice = parseFloat(activeBin.price);
+                
+                this.priceHistory.push({
+                  timestamp: Date.now(),
+                  price: currentPrice
+                });
+                
+                // Limit history length to last 100 data points
+                if (this.priceHistory.length > 100) {
+                  this.priceHistory = this.priceHistory.slice(-100);
+                }
+                
+                // Update volume history (placeholder - would need actual volume data)
+                // In a production system, you would fetch real volume data
+                const estimatedVolume = Math.random() * 10000; // Placeholder for demo
+                
+                this.volumeHistory.push({
+                  timestamp: Date.now(),
+                  volume: estimatedVolume
+                });
+                
+                // Limit history length to last 100 data points
+                if (this.volumeHistory.length > 100) {
+                  this.volumeHistory = this.volumeHistory.slice(-100);
+                }
+              } catch (refreshError) {
+                logger.error('Failed to refresh DLMM state, will retry next cycle:', refreshError);
+                // Continue to next iteration rather than failing the entire agent
+                await sleep(this.config.pollingInterval || 60000);
+                continue;
               }
             }
-          } catch (rebalanceCheckError) {
-            logger.error('Error checking if rebalance is needed:', rebalanceCheckError);
-          }
 
-          // Collect fees periodically
-          if (this.shouldCollectFees()) {
+            // Check if rebalance is needed
             try {
-              await this.collectFees();
-            } catch (feeError) {
-              logger.error('Fee collection failed:', feeError);
-              // Don't throw, continue with the next cycle
+              const shouldRebalanceNow = await this.shouldRebalance();
+              if (shouldRebalanceNow) {
+                try {
+                  await this.rebalance();
+                } catch (rebalanceError) {
+                  logger.error('Rebalance operation failed:', rebalanceError);
+                  // Don't throw, continue with the next operation
+                }
+              }
+            } catch (rebalanceCheckError) {
+              logger.error('Error checking if rebalance is needed:', rebalanceCheckError);
             }
-          }
 
-          // Wait before next iteration
-          await sleep(this.config.pollingInterval || 60000);
-        } catch (cycleError) {
-          // This catch will handle any errors not caught by the individual operation handlers
-          logger.error('Error in agent cycle, will continue running:', cycleError);
-          await sleep(this.config.retryDelay || 5000); // Shorter delay on error before next attempt
+            // Collect fees periodically
+            if (this.shouldCollectFees()) {
+              try {
+                await this.collectFees();
+              } catch (feeError) {
+                logger.error('Fee collection failed:', feeError);
+                // Don't throw, continue with the next cycle
+              }
+            }
+
+            // Wait before next iteration
+            await sleep(this.config.pollingInterval || 60000);
+          } catch (cycleError) {
+            // This catch will handle any errors not caught by the individual operation handlers
+            logger.error('Error in agent cycle, will continue running:', cycleError);
+            await sleep(this.config.retryDelay || 5000); // Shorter delay on error before next attempt
+          }
         }
       }
     } catch (error) {
@@ -631,6 +666,15 @@ export class Comet {
    */
   async stop(): Promise<void> {
     this.isRunning = false;
+    
+    // Stop MicroPortfolio strategy if active
+    if (this.microPortfolioAgent) {
+      try {
+        await this.microPortfolioAgent.stop();
+      } catch (error) {
+        logger.error('Failed to stop MicroPortfolio strategy:', error);
+      }
+    }
     
     // Update agent status in database
     if (this.agentId && this.config.poolAddress) {

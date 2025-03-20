@@ -17,7 +17,7 @@ export interface CometConfig {
   poolAddress?: string;
   
   // Strategy
-  strategy?: string; // 'Spot', 'BidAsk', 'Curve'
+  strategy?: string; // 'Spot', 'BidAsk', 'Curve', 'MicroPortfolio'
   binRange?: number; // Number of bins to each side of active bin
   
   // Rebalancing
@@ -52,6 +52,21 @@ export interface CometConfig {
     maxTokens?: number;
     enabled: boolean;
     riskProfile?: 'conservative' | 'moderate' | 'aggressive';
+  };
+  
+  // MicroPortfolio strategy settings
+  microPortfolio?: {
+    initialCapital?: {
+      usdc: number; // in native units
+      sol: number;  // in native units
+    };
+    riskTolerance?: 'low' | 'medium' | 'high';
+    usdcMint?: string;
+    solMint?: string;
+    maxAllocationPerPool?: number; // % of portfolio
+    rebalanceThreshold?: number;   // % price change
+    compoundInterval?: number;     // ms between fee compounding
+    weekendSafetyEnabled?: boolean;
   };
   
   // Logging

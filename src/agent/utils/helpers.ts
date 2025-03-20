@@ -185,6 +185,25 @@ export function parseEnvConfig(): any {
       riskProfile: process.env.CLAUDE_RISK_PROFILE || 'moderate'
     },
     
+    // MicroPortfolio strategy settings
+    microPortfolio: {
+      initialCapital: {
+        usdc: process.env.MICRO_USDC 
+          ? parseFloat(process.env.MICRO_USDC) * 1_000_000 
+          : 100_000_000, // $100 USDC in native units
+        sol: process.env.MICRO_SOL
+          ? parseFloat(process.env.MICRO_SOL) * 1_000_000_000
+          : 1_000_000_000, // 1 SOL in native units
+      },
+      riskTolerance: (process.env.MICRO_RISK_TOLERANCE || 'medium') as 'low' | 'medium' | 'high',
+      usdcMint: process.env.MICRO_USDC_MINT || 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC on Solana
+      solMint: process.env.MICRO_SOL_MINT || 'So11111111111111111111111111111111111111112', // SOL
+      maxAllocationPerPool: parseInt(process.env.MICRO_MAX_ALLOCATION || '50'),
+      rebalanceThreshold: parseFloat(process.env.MICRO_REBALANCE_THRESHOLD || '5'),
+      compoundInterval: parseInt(process.env.MICRO_COMPOUND_INTERVAL || '86400000'),
+      weekendSafetyEnabled: process.env.MICRO_WEEKEND_SAFETY === 'true'
+    },
+    
     // Logging
     logLevel: process.env.COMET_LOG_LEVEL || 'info',
   };

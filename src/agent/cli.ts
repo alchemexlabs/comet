@@ -30,12 +30,16 @@ program
   .command('start')
   .description('Start the Comet agent')
   .option('-p, --pool <address>', 'Pool address to manage')
-  .option('-s, --strategy <type>', 'Strategy type (Spot, BidAsk, Curve)')
+  .option('-s, --strategy <type>', 'Strategy type (Spot, BidAsk, Curve, MicroPortfolio)')
   .option('-r, --range <number>', 'Bin range around active bin')
   .option('-a, --auto-rebalance <boolean>', 'Enable auto rebalancing')
   .option('-i, --interval <ms>', 'Polling interval in milliseconds')
   .option('--claude-enabled <boolean>', 'Enable Claude AI integration')
   .option('--claude-risk <profile>', 'Claude AI risk profile (conservative, moderate, aggressive)')
+  .option('--micro-risk <profile>', 'MicroPortfolio risk profile (low, medium, high)')
+  .option('--micro-usdc <amount>', 'Initial USDC amount for MicroPortfolio (in USDC)')
+  .option('--micro-sol <amount>', 'Initial SOL amount for MicroPortfolio (in SOL)')
+  .option('--micro-weekend-safety <boolean>', 'Enable weekend safety mode for MicroPortfolio')
   .action(async (options) => {
     try {
       // Merge CLI options with environment config
@@ -56,6 +60,22 @@ program
             ? options.claudeEnabled === 'true'
             : envConfig.claude?.enabled,
           riskProfile: options.claudeRisk || envConfig.claude?.riskProfile
+        },
+        // MicroPortfolio strategy settings
+        microPortfolio: {
+          ...envConfig.microPortfolio,
+          riskTolerance: options.microRisk || envConfig.microPortfolio?.riskTolerance,
+          weekendSafetyEnabled: options.microWeekendSafety !== undefined
+            ? options.microWeekendSafety === 'true'
+            : envConfig.microPortfolio?.weekendSafetyEnabled,
+          initialCapital: {
+            usdc: options.microUsdc 
+              ? parseFloat(options.microUsdc) * 1_000_000 // Convert to native units
+              : envConfig.microPortfolio?.initialCapital?.usdc || 100_000_000,
+            sol: options.microSol
+              ? parseFloat(options.microSol) * 1_000_000_000 // Convert to native units
+              : envConfig.microPortfolio?.initialCapital?.sol || 1_000_000_000
+          }
         }
       };
       

@@ -67,3 +67,23 @@ Comet is an autonomous liquidity agent for Meteora DLMM pools that:
 - Optimizes liquidity distribution for maximum capital efficiency
 - Claims and compounds fees and rewards
 - Provides real-time analytics on position performance
+
+## Strategy Types
+
+### Standard Strategies
+- **Spot**: Distributes liquidity evenly around the active bin
+- **BidAsk**: Concentrates liquidity at the active bin and spreads out
+- **Curve**: Distributes liquidity in a normal distribution around active bin
+
+### MicroPortfolio Strategy
+A specialized strategy for growing a small portfolio ($100 USDC + 1 SOL):
+- Intelligently allocates capital across multiple token pairs
+- Implements weekend safety mode for risk reduction
+- Dynamically adjusts based on market volatility
+- Compounds fees for accelerated growth
+- Adapts strategy based on risk profile (low/medium/high)
+
+Example usage:
+```
+bun run start-agent-cli start --strategy MicroPortfolio --micro-risk medium --micro-usdc 100 --micro-sol 1 --micro-weekend-safety true --claude-enabled true
+```
