@@ -41,6 +41,10 @@ export const API_RATE_LIMITS: Record<string, RateLimitConfig> = {
     requests: parseInt(process.env.RATE_LIMIT_HELIUS_API || '10'), 
     period: 1000 
   },
+  'helius:priorityFee': { 
+    requests: parseInt(process.env.RATE_LIMIT_HELIUS_PRIORITY_FEE || '10'), 
+    period: 1000 
+  },
   'helius:webhook': { 
     requests: parseInt(process.env.RATE_LIMIT_HELIUS_WEBHOOK || '2'), 
     period: 1000 

@@ -231,7 +231,8 @@ export class Comet {
       // Add liquidity by strategy
       const strategyType = this.getStrategyType();
       
-      const createPositionTx = await this.dlmm.initializePositionAndAddLiquidityByStrategy({
+      // Build transaction
+      const { transaction, signers } = await this.dlmm.initializePositionAndAddLiquidityByStrategy({
         positionPubKey: positionKeypair.publicKey,
         user: this.wallet.publicKey,
         totalXAmount: xAmount,
@@ -243,11 +244,33 @@ export class Comet {
         },
       });
 
-      // Execute the transaction
-      // Implementation needed for transaction signing and sending
+      // Import transaction utils here to avoid circular dependencies
+      const { sendTransactionWithPriorityFee, confirmTransactionWithTimeout } = await import('./utils/transaction');
+
+      // Add the wallet to the signers array
+      signers.push(this.wallet);
+
+      // For LP provision, use high importance for reliable on-chain landing
+      const signature = await sendTransactionWithPriorityFee(
+        this.connection, 
+        transaction, 
+        signers, 
+        'high',  // High importance for LP operations
+        5        // 5 retries max
+      );
+
+      logger.info(`Liquidity add transaction sent with signature: ${signature}`);
+
+      // Wait for confirmation
+      await confirmTransactionWithTimeout(
+        this.connection,
+        signature,
+        120000, // 2 minute timeout for LP operations
+        'confirmed'
+      );
 
       logger.info('Liquidity added successfully');
-      return 'TRANSACTION_SIGNATURE'; // Replace with actual signature
+      return signature;
     } catch (error) {
       logger.error('Failed to add liquidity', error);
       throw error;
@@ -271,6 +294,8 @@ export class Comet {
     let strategyType = this.getStrategyType();
     let minBinId: number;
     let maxBinId: number;
+    let xWeighting: number = 50; // Default to 50% weight for token X
+    let yWeighting: number = 50; // Default to 50% weight for token Y
 
     try {
       // Get current positions
@@ -346,6 +371,13 @@ export class Comet {
               minBinId = oldActiveBin - defaultBinRange;
               maxBinId = oldActiveBin + defaultBinRange;
             }
+            
+            // Use Claude's token weighting recommendation if available
+            if (recommendation.xWeighting && recommendation.yWeighting) {
+              xWeighting = recommendation.xWeighting;
+              yWeighting = recommendation.yWeighting;
+              logger.info(`Using Claude AI recommended token weighting: X=${xWeighting}%, Y=${yWeighting}%`);
+            }
           } else {
             // Use default parameters if Claude doesn't provide clear recommendations
             minBinId = oldActiveBin - defaultBinRange;
@@ -363,11 +395,143 @@ export class Comet {
         maxBinId = oldActiveBin + defaultBinRange;
       }
       
-      // Remove liquidity from current positions
-      // Implementation needed
+      // Import transaction utils here to avoid circular dependencies
+      const { sendTransactionWithPriorityFee, confirmTransactionWithTimeout } = await import('./utils/transaction');
       
-      // Add liquidity to new positions with the AI-recommended or default strategy
-      // Implementation needed
+      // 1. Remove liquidity from current positions
+      logger.info(`Removing liquidity from ${userPositions.length} existing positions`);
+      
+      // Process positions in batches to avoid transaction size limits
+      const positionBatchSize = 3; // Process 3 positions at a time (adjust based on transaction capacity)
+      
+      // Total amounts retrieved from positions
+      let totalXAmount = new BN(0);
+      let totalYAmount = new BN(0);
+      
+      for (let i = 0; i < userPositions.length; i += positionBatchSize) {
+        const batchPositions = userPositions.slice(i, i + positionBatchSize);
+        
+        // Build transaction for this batch
+        for (const position of batchPositions) {
+          logger.info(`Removing liquidity from position ${position.publicKey.toString()}`);
+          
+          try {
+            // Get position liquidity info
+            const liquidityInfo = await this.dlmm.getPositionLiquidity(position.publicKey);
+            
+            const { transaction, signers, amounts } = await this.dlmm.removeLiquidity({
+              positionPubKey: position.publicKey,
+              user: this.wallet.publicKey,
+              liquidityAmount: liquidityInfo.liquidityAmount, // Remove all liquidity
+              minXAmount: new BN(0), // Set appropriate slippage protection in production
+              minYAmount: new BN(0)  // Set appropriate slippage protection in production
+            });
+            
+            // Add the wallet to the signers array
+            signers.push(this.wallet);
+            
+            // Send transaction with optimized priority fees
+            const signature = await sendTransactionWithPriorityFee(
+              this.connection, 
+              transaction, 
+              signers, 
+              'high', // High importance for liquidity operations
+              5       // 5 retries max
+            );
+            
+            logger.info(`Liquidity removal transaction sent with signature: ${signature}`);
+            
+            // Wait for confirmation
+            await confirmTransactionWithTimeout(
+              this.connection,
+              signature,
+              120000, // 2 minute timeout for LP operations
+              'confirmed'
+            );
+            
+            // Keep track of removed amounts
+            totalXAmount = totalXAmount.add(amounts.xAmount);
+            totalYAmount = totalYAmount.add(amounts.yAmount);
+            
+            logger.info(`Successfully removed ${amounts.xAmount.toString()} X and ${amounts.yAmount.toString()} Y from position ${position.publicKey.toString()}`);
+            
+            // Save the transaction hash for the first successful removal
+            if (!transactionHash) {
+              transactionHash = signature;
+            }
+          } catch (removeError) {
+            logger.error(`Failed to remove liquidity from position ${position.publicKey.toString()}:`, removeError);
+            // Continue with other positions even if one fails
+          }
+        }
+        
+        // Wait a moment between batches to avoid rate limiting
+        await sleep(2000);
+      }
+      
+      // 2. Add liquidity to new positions with optimized strategy
+      if (totalXAmount.gtn(0) || totalYAmount.gtn(0)) {
+        logger.info(`Re-adding liquidity with strategy ${strategyType}, bin range: ${minBinId}-${maxBinId}`);
+        logger.info(`Total amounts recovered: ${totalXAmount.toString()} X, ${totalYAmount.toString()} Y`);
+        
+        // Adjust amounts based on AI-recommended weighting
+        const totalValue = totalXAmount.add(totalYAmount);
+        
+        // Apply the weighting (simplified approach - in production would use exchange rates)
+        const newXAmount = totalValue.muln(xWeighting).divn(100);
+        const newYAmount = totalValue.muln(yWeighting).divn(100);
+        
+        // Create new position
+        try {
+          // Create position keypair
+          const positionKeypair = Keypair.generate();
+          
+          // Add liquidity with the optimized strategy
+          const { transaction, signers } = await this.dlmm.initializePositionAndAddLiquidityByStrategy({
+            positionPubKey: positionKeypair.publicKey,
+            user: this.wallet.publicKey,
+            totalXAmount: newXAmount,
+            totalYAmount: newYAmount,
+            strategy: {
+              maxBinId,
+              minBinId,
+              strategyType,
+            },
+          });
+          
+          // Add the wallet to the signers array
+          signers.push(this.wallet);
+          
+          // Send transaction with optimized priority fees
+          const signature = await sendTransactionWithPriorityFee(
+            this.connection, 
+            transaction, 
+            signers, 
+            'high', // High importance for LP operations
+            5       // 5 retries max
+          );
+          
+          logger.info(`New liquidity position transaction sent with signature: ${signature}`);
+          
+          // Wait for confirmation
+          await confirmTransactionWithTimeout(
+            this.connection,
+            signature,
+            120000, // 2 minute timeout for LP operations
+            'confirmed'
+          );
+          
+          logger.info(`Successfully created new liquidity position with ${newXAmount.toString()} X and ${newYAmount.toString()} Y`);
+          
+          // Save the transaction hash
+          transactionHash = signature;
+        } catch (addError) {
+          logger.error('Failed to add liquidity to new position:', addError);
+          throw addError; // Rethrow to mark rebalance as failed
+        }
+      } else {
+        logger.warn('No liquidity was recovered from positions, cannot create new positions');
+      }
 
       this.lastRebalanceTime = Date.now();
       
@@ -474,16 +638,36 @@ export class Comet {
       );
 
       // Claim swap fees
-      const claimFeeTxs = await this.dlmm.claimAllSwapFee({
+      const { transaction, signers } = await this.dlmm.claimAllSwapFee({
         owner: this.wallet.publicKey,
         positions: userPositions,
       });
 
-      // Execute transaction(s)
-      // Implementation needed for transaction signing and sending
+      // Import transaction utils
+      const { sendTransactionWithPriorityFee, confirmTransactionWithTimeout } = await import('./utils/transaction');
+
+      // Add the wallet to the signers array
+      signers.push(this.wallet);
       
-      // For now, let's assume a successful transaction
-      transactionHash = 'PLACEHOLDER_TX_HASH';
+      // Send the transaction with optimized priority fees
+      // Use medium importance for fee collection
+      transactionHash = await sendTransactionWithPriorityFee(
+        this.connection,
+        transaction,
+        signers,
+        'medium', // Fee collection is important but not as critical as liquidity ops
+        3 // 3 retries max
+      );
+      
+      logger.info(`Fee collection transaction sent with signature: ${transactionHash}`);
+      
+      // Wait for confirmation
+      await confirmTransactionWithTimeout(
+        this.connection,
+        transactionHash,
+        60000, // 1 minute timeout
+        'confirmed'
+      );
       
       // Get token prices for USD conversion
       const poolInfo = this.dlmm.lbPair;
