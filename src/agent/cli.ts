@@ -34,6 +34,8 @@ program
   .option('-r, --range <number>', 'Bin range around active bin')
   .option('-a, --auto-rebalance <boolean>', 'Enable auto rebalancing')
   .option('-i, --interval <ms>', 'Polling interval in milliseconds')
+  .option('--claude-enabled <boolean>', 'Enable Claude AI integration')
+  .option('--claude-risk <profile>', 'Claude AI risk profile (conservative, moderate, aggressive)')
   .action(async (options) => {
     try {
       // Merge CLI options with environment config
@@ -47,7 +49,14 @@ program
           : envConfig.autoRebalance,
         pollingInterval: options.interval 
           ? parseInt(options.interval) 
-          : envConfig.pollingInterval
+          : envConfig.pollingInterval,
+        claude: {
+          ...envConfig.claude,
+          enabled: options.claudeEnabled !== undefined
+            ? options.claudeEnabled === 'true'
+            : envConfig.claude?.enabled,
+          riskProfile: options.claudeRisk || envConfig.claude?.riskProfile
+        }
       };
       
       // Check required config

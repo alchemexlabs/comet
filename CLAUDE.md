@@ -31,13 +31,33 @@ bun run start-server # Start the Hono server
 
 ## Environment Variables (.env.example)
 ```
+# Comet Agent Configuration
+RPC_URL=https://api.helius.xyz/v0/solanaqt
 HELIUS_API_KEY=your_helius_api_key
 BIRDEYE_API_KEY=your_birdeye_api_key
-RPC_URL=https://api.helius.xyz/v0/solanaqt
 BIRDEYE_API_URL=https://public-api.birdeye.so
+
+# Wallet Configuration
 COMET_WALLET_KEY=your_wallet_private_key
+
+# Strategy Configuration
+COMET_POOL_ADDRESS=your_pool_address
 COMET_STRATEGY=Spot  # Options: Spot, BidAsk, Curve
+COMET_BIN_RANGE=10
 COMET_AUTO_REBALANCE=true
+COMET_MIN_REBALANCE_INTERVAL=3600000  # 1 hour in milliseconds
+COMET_PRICE_DEVIATION_THRESHOLD=2.5   # % price change that triggers rebalance
+
+# Claude AI Integration
+CLAUDE_API_KEY=your_claude_api_key
+CLAUDE_MODEL=claude-3-sonnet-20240229  # options: claude-3-haiku-20240307, claude-3-sonnet-20240229, claude-3-opus-20240229
+CLAUDE_ENABLED=true
+CLAUDE_RISK_PROFILE=moderate  # options: conservative, moderate, aggressive
+CLAUDE_TEMPERATURE=0.1        # 0.0-1.0, lower = more deterministic
+CLAUDE_MAX_TOKENS=1024        # max tokens in response
+
+# Logging
+LOG_LEVEL=info  # debug, info, warn, error
 ```
 
 ## Comet Agent

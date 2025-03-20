@@ -13,6 +13,7 @@ import { CometConfig } from './types';
 import { loadWalletFromKey, sleep } from './utils/helpers';
 import { getPriceFromBirdeye } from './utils/price';
 import { logger } from './utils/logger';
+import { ClaudeService } from './utils/claude';
 import { 
   initializeDatabase, 
   registerAgent, 
@@ -31,11 +32,29 @@ export class Comet {
   private isRunning = false;
   private lastRebalanceTime = 0;
   private agentId: number | null = null;
+  private claudeService: ClaudeService | null = null;
+  private priceHistory: Array<{timestamp: number, price: number}> = [];
+  private volumeHistory: Array<{timestamp: number, volume: number}> = [];
 
   constructor(config: CometConfig) {
     this.config = config;
     this.connection = new Connection(config.rpcUrl, 'confirmed');
     this.wallet = loadWalletFromKey(config.walletKey);
+    
+    // Initialize Claude AI service if enabled
+    if (config.claude?.enabled && config.claude.apiKey) {
+      try {
+        this.claudeService = new ClaudeService({
+          apiKey: config.claude.apiKey,
+          model: config.claude.model || 'claude-3-sonnet-20240229',
+          temperature: config.claude.temperature,
+          maxTokens: config.claude.maxTokens
+        });
+        logger.info('Claude AI service initialized');
+      } catch (error) {
+        logger.error('Failed to initialize Claude AI service', error);
+      }
+    }
   }
 
   /**
@@ -77,11 +96,24 @@ export class Comet {
         const activeBin = await this.dlmm.getActiveBin();
         const tokenXPrice = await getPriceFromBirdeye(poolInfo.tokenX.mint.toString(), 1);
         const tokenYPrice = await getPriceFromBirdeye(poolInfo.tokenY.mint.toString(), 1);
+        const currentPrice = parseFloat(activeBin.price);
+        
+        // Initialize price history
+        this.priceHistory.push({
+          timestamp: Date.now(),
+          price: currentPrice
+        });
+        
+        // Initialize volume history (placeholder - would need actual volume data)
+        this.volumeHistory.push({
+          timestamp: Date.now(),
+          volume: 0 // Placeholder, would need to get real volume data
+        });
         
         await recordPoolMetrics(
           this.config.poolAddress,
           activeBin.binId,
-          parseFloat(activeBin.price),
+          currentPrice,
           tokenXPrice,
           tokenYPrice,
           poolInfo.reserveX.toString(),
@@ -208,6 +240,9 @@ export class Comet {
     let transactionHash: string | undefined;
     let success = false;
     let errorMessage: string | undefined;
+    let strategyType = this.getStrategyType();
+    let minBinId: number;
+    let maxBinId: number;
 
     try {
       // Get current positions
@@ -223,13 +258,87 @@ export class Comet {
       oldActiveBin = oldActiveBinInfo.binId;
       oldPrice = parseFloat(oldActiveBinInfo.price);
       
-      // Check if rebalance is needed based on active bin and position bins
-      // Implementation needed
+      // Default bin range from config
+      const defaultBinRange = this.config.binRange || 10;
+      
+      // If Claude AI is enabled, use it to generate strategy parameters
+      if (this.claudeService && this.config.claude?.enabled) {
+        try {
+          const poolInfo = this.dlmm.lbPair;
+          
+          // Calculate market volatility from price history
+          const priceVolatility = this.calculatePriceVolatility();
+          
+          // Determine market trend
+          const marketTrend = this.determineMarketTrend();
+          
+          // Prepare market data for Claude
+          const marketData = {
+            activeBinId: oldActiveBin,
+            binStep: poolInfo.binStep.toNumber(),
+            currentPrice: oldPrice,
+            tokenXSymbol: poolInfo.tokenX.mint.toString().slice(0, 8) + '...', // Use actual token symbols if available
+            tokenYSymbol: poolInfo.tokenY.mint.toString().slice(0, 8) + '...',
+            priceHistory: this.priceHistory,
+            volumeHistory: this.volumeHistory,
+            marketVolatility: priceVolatility,
+            marketTrend
+          };
+          
+          // Get optimal strategy parameters from Claude AI
+          const riskProfile = this.config.claude?.riskProfile || 'moderate';
+          const recommendation = await this.claudeService.getRebalanceRecommendation(marketData);
+          
+          // Use Claude's strategy recommendation if available
+          if (recommendation && recommendation.strategy) {
+            logger.info(`Using Claude AI recommended strategy: ${recommendation.strategy}`);
+            
+            switch (recommendation.strategy) {
+              case StrategyType.Spot:
+                strategyType = StrategyType.Spot;
+                break;
+              case StrategyType.BidAsk:
+                strategyType = StrategyType.BidAsk;
+                break;
+              case StrategyType.Curve:
+                strategyType = StrategyType.Curve;
+                break;
+              default:
+                // Keep existing strategy if recommendation is not recognized
+                break;
+            }
+            
+            // Use Claude's bin range recommendation if available
+            if (recommendation.binRange && recommendation.binRange > 0) {
+              minBinId = recommendation.minBinId;
+              maxBinId = recommendation.maxBinId;
+              logger.info(`Using Claude AI recommended bin range: ${minBinId} to ${maxBinId}`);
+            } else {
+              // Use default bin range if not specified by Claude
+              minBinId = oldActiveBin - defaultBinRange;
+              maxBinId = oldActiveBin + defaultBinRange;
+            }
+          } else {
+            // Use default parameters if Claude doesn't provide clear recommendations
+            minBinId = oldActiveBin - defaultBinRange;
+            maxBinId = oldActiveBin + defaultBinRange;
+          }
+        } catch (aiError) {
+          logger.error('Error getting AI strategy recommendations, using defaults:', aiError);
+          // Fall back to default parameters
+          minBinId = oldActiveBin - defaultBinRange;
+          maxBinId = oldActiveBin + defaultBinRange;
+        }
+      } else {
+        // Use default parameters if Claude is not enabled
+        minBinId = oldActiveBin - defaultBinRange;
+        maxBinId = oldActiveBin + defaultBinRange;
+      }
       
       // Remove liquidity from current positions
       // Implementation needed
       
-      // Add liquidity to new positions around active bin
+      // Add liquidity to new positions with the AI-recommended or default strategy
       // Implementation needed
 
       this.lastRebalanceTime = Date.now();
@@ -242,7 +351,7 @@ export class Comet {
       // Set success flag
       success = true;
       
-      logger.info('Rebalance completed successfully');
+      logger.info(`Rebalance completed successfully with strategy: ${strategyType}, bin range: ${minBinId}-${maxBinId}`);
       
       // Record rebalance event in database
       await recordRebalanceEvent(
@@ -440,6 +549,34 @@ export class Comet {
           if (this.dlmm) {
             try {
               await this.dlmm.refetchStates();
+              
+              // Update price history
+              const activeBin = await this.dlmm.getActiveBin();
+              const currentPrice = parseFloat(activeBin.price);
+              
+              this.priceHistory.push({
+                timestamp: Date.now(),
+                price: currentPrice
+              });
+              
+              // Limit history length to last 100 data points
+              if (this.priceHistory.length > 100) {
+                this.priceHistory = this.priceHistory.slice(-100);
+              }
+              
+              // Update volume history (placeholder - would need actual volume data)
+              // In a production system, you would fetch real volume data
+              const estimatedVolume = Math.random() * 10000; // Placeholder for demo
+              
+              this.volumeHistory.push({
+                timestamp: Date.now(),
+                volume: estimatedVolume
+              });
+              
+              // Limit history length to last 100 data points
+              if (this.volumeHistory.length > 100) {
+                this.volumeHistory = this.volumeHistory.slice(-100);
+              }
             } catch (refreshError) {
               logger.error('Failed to refresh DLMM state, will retry next cycle:', refreshError);
               // Continue to next iteration rather than failing the entire agent
@@ -449,13 +586,18 @@ export class Comet {
           }
 
           // Check if rebalance is needed
-          if (this.shouldRebalance()) {
-            try {
-              await this.rebalance();
-            } catch (rebalanceError) {
-              logger.error('Rebalance operation failed:', rebalanceError);
-              // Don't throw, continue with the next operation
+          try {
+            const shouldRebalanceNow = await this.shouldRebalance();
+            if (shouldRebalanceNow) {
+              try {
+                await this.rebalance();
+              } catch (rebalanceError) {
+                logger.error('Rebalance operation failed:', rebalanceError);
+                // Don't throw, continue with the next operation
+              }
             }
+          } catch (rebalanceCheckError) {
+            logger.error('Error checking if rebalance is needed:', rebalanceCheckError);
           }
 
           // Collect fees periodically
@@ -505,7 +647,7 @@ export class Comet {
   /**
    * Check if rebalance is needed
    */
-  private shouldRebalance(): boolean {
+  private async shouldRebalance(): Promise<boolean> {
     // Check if auto-rebalance is enabled
     if (!this.config.autoRebalance) {
       return false;
@@ -514,7 +656,121 @@ export class Comet {
     // Check if minimum rebalance interval has passed
     const minInterval = this.config.minRebalanceInterval || 3600000; // 1 hour default
     const timeSinceLastRebalance = Date.now() - this.lastRebalanceTime;
-    return timeSinceLastRebalance >= minInterval;
+    
+    if (timeSinceLastRebalance < minInterval) {
+      return false;
+    }
+    
+    // If Claude AI is not enabled, use simple time-based rebalancing
+    if (!this.claudeService || !this.config.claude?.enabled) {
+      return true;
+    }
+    
+    try {
+      // Get current market data for AI analysis
+      if (!this.dlmm) {
+        return false;
+      }
+      
+      const activeBin = await this.dlmm.getActiveBin();
+      const poolInfo = this.dlmm.lbPair;
+      
+      // Calculate market volatility from price history
+      const priceVolatility = this.calculatePriceVolatility();
+      
+      // Determine market trend
+      const marketTrend = this.determineMarketTrend();
+      
+      // Prepare market data for Claude
+      const marketData = {
+        activeBinId: activeBin.binId,
+        binStep: poolInfo.binStep.toNumber(),
+        currentPrice: parseFloat(activeBin.price),
+        tokenXSymbol: poolInfo.tokenX.mint.toString().slice(0, 8) + '...', // Use actual token symbols if available
+        tokenYSymbol: poolInfo.tokenY.mint.toString().slice(0, 8) + '...',
+        priceHistory: this.priceHistory,
+        volumeHistory: this.volumeHistory,
+        marketVolatility: priceVolatility,
+        marketTrend
+      };
+      
+      // Get recommendation from Claude AI
+      const recommendation = await this.claudeService.getRebalanceRecommendation(marketData);
+      
+      // Log the recommendation
+      logger.info(`Claude AI rebalance recommendation: ${recommendation.shouldRebalance ? 'YES' : 'NO'} (${recommendation.reason})`);
+      
+      // Return Claude's recommendation
+      return recommendation.shouldRebalance;
+    } catch (error) {
+      logger.error('Error in Claude AI rebalance decision, falling back to time-based rebalancing', error);
+      return true; // Fall back to simple time-based rebalancing on error
+    }
+  }
+  
+  /**
+   * Calculate price volatility from price history
+   */
+  private calculatePriceVolatility(): number {
+    // Need at least 2 price points to calculate volatility
+    if (this.priceHistory.length < 2) {
+      return 0;
+    }
+    
+    // Get recent prices (last 24 data points or all if fewer)
+    const prices = this.priceHistory.slice(-24).map(p => p.price);
+    
+    // Calculate standard deviation
+    const mean = prices.reduce((sum, price) => sum + price, 0) / prices.length;
+    const variance = prices.reduce((sum, price) => sum + Math.pow(price - mean, 2), 0) / prices.length;
+    const stdDev = Math.sqrt(variance);
+    
+    // Convert to percentage
+    const volatilityPercentage = (stdDev / mean) * 100;
+    
+    return parseFloat(volatilityPercentage.toFixed(2));
+  }
+  
+  /**
+   * Determine market trend from price history
+   */
+  private determineMarketTrend(): string {
+    // Need at least 2 price points to determine trend
+    if (this.priceHistory.length < 2) {
+      return 'sideways';
+    }
+    
+    // Get recent prices (last 10 data points or all if fewer)
+    const recentPrices = this.priceHistory.slice(-10);
+    
+    // Simple linear regression to determine trend
+    const n = recentPrices.length;
+    let sumX = 0;
+    let sumY = 0;
+    let sumXY = 0;
+    let sumXX = 0;
+    
+    recentPrices.forEach((point, index) => {
+      const x = index;
+      const y = point.price;
+      
+      sumX += x;
+      sumY += y;
+      sumXY += x * y;
+      sumXX += x * x;
+    });
+    
+    // Calculate slope
+    const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+    
+    // Determine trend based on slope
+    if (slope > 0.01) {
+      return 'bullish';
+    } else if (slope < -0.01) {
+      return 'bearish';
+    } else {
+      return 'sideways';
+    }
   }
 
   /**

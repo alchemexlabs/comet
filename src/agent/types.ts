@@ -44,6 +44,16 @@ export interface CometConfig {
     hasAlphaVault: boolean;
   };
   
+  // Claude AI integration
+  claude?: {
+    apiKey: string;
+    model: string;
+    temperature?: number;
+    maxTokens?: number;
+    enabled: boolean;
+    riskProfile?: 'conservative' | 'moderate' | 'aggressive';
+  };
+  
   // Logging
   logLevel?: 'debug' | 'info' | 'warn' | 'error';
 }

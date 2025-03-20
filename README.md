@@ -58,6 +58,8 @@ graph TD
 - **Dynamic Rebalancing**: Monitor pool prices and automatically rebalance positions
 - **Fee Collection**: Collect and reinvest trading fees to compound returns
 - **Multiple Strategies**: Support for Spot, BidAsk, and Curve liquidity distribution strategies
+- **AI-Enhanced Decision Making**: Integration with Claude AI for intelligent rebalancing recommendations
+- **Market Analysis**: Advanced volatility and trend analysis for optimized positioning
 - **REST API and CLI**: Manage your agents through an API or command line interface
 - **Time-Series Analytics**: Track historical performance with PostgreSQL and TimescaleDB
 - **Dockerized Deployment**: Run the entire system with a single docker-compose command
@@ -104,25 +106,40 @@ The Docker setup includes:
 Create a `.env` file based on `.env.example`:
 
 ```
+# Comet Agent Configuration
+RPC_URL=https://api.helius.xyz/v0/solanaqt
 HELIUS_API_KEY=your_helius_api_key
 BIRDEYE_API_KEY=your_birdeye_api_key
-RPC_URL=https://api.helius.xyz/v0/solanaqt
 BIRDEYE_API_URL=https://public-api.birdeye.so
 
-# Comet Agent Configuration
+# Wallet Configuration
 COMET_WALLET_KEY=your_wallet_private_key
+
+# Strategy Configuration
 COMET_POOL_ADDRESS=your_pool_address
 COMET_STRATEGY=Spot  # Options: Spot, BidAsk, Curve
-COMET_AUTO_REBALANCE=true
 COMET_BIN_RANGE=10
-COMET_MIN_REBALANCE_INTERVAL=3600000
-COMET_PRICE_DEVIATION_THRESHOLD=1.0
+COMET_AUTO_REBALANCE=true
+COMET_MIN_REBALANCE_INTERVAL=3600000  # 1 hour in milliseconds
+COMET_PRICE_DEVIATION_THRESHOLD=2.5   # % price change that triggers rebalance
 COMET_FEE_COLLECTION_INTERVAL=86400000
 COMET_POLLING_INTERVAL=60000
 COMET_MAX_RETRIES=3
 COMET_RETRY_DELAY=1000
-COMET_LOG_LEVEL=info
+
+# Claude AI Integration
+CLAUDE_API_KEY=your_claude_api_key
+CLAUDE_MODEL=claude-3-sonnet-20240229  # options: claude-3-haiku-20240307, claude-3-sonnet-20240229, claude-3-opus-20240229
+CLAUDE_ENABLED=true
+CLAUDE_RISK_PROFILE=moderate  # options: conservative, moderate, aggressive
+CLAUDE_TEMPERATURE=0.1        # 0.0-1.0, lower = more deterministic
+CLAUDE_MAX_TOKENS=1024        # max tokens in response
+
+# API Configuration
 COMET_API_PORT=3001
+
+# Logging
+COMET_LOG_LEVEL=info  # debug, info, warn, error
 ```
 
 ## Usage
@@ -137,7 +154,7 @@ bun run start-agent
 
 ```bash
 # Start an agent for a specific pool
-bun run start-agent-cli start --pool <pool_address> --strategy Spot --auto-rebalance true
+bun run start-agent-cli start --pool <pool_address> --strategy Spot --auto-rebalance true --claude-enabled true --claude-risk moderate
 
 # Create a new DLMM pool
 bun run start-agent-cli create-pool --token-x <token_x_address> --token-y <token_y_address> --bin-step 20 --active-id 8388608 --fee-bps 20
@@ -161,7 +178,11 @@ POST /agents/start
   "poolAddress": "ARwi1S4DaiTG5DX7S4M4ZsrXqpMD1MrTmbu9ue2tpmEq",
   "strategy": "Spot",
   "binRange": 10,
-  "autoRebalance": true
+  "autoRebalance": true,
+  "claude": {
+    "enabled": true,
+    "riskProfile": "moderate"
+  }
 }
 ```
 
@@ -234,6 +255,16 @@ PostgreSQL with TimescaleDB extension provides high-performance time-series data
 - **Spot**: Distributes liquidity evenly around the active bin
 - **BidAsk**: Concentrates liquidity at the active bin and spreads out
 - **Curve**: Distributes liquidity in a normal distribution around the active bin
+
+### Claude AI Integration
+
+The Comet agent integrates with Anthropic's Claude AI to enhance decision-making for liquidity management:
+
+- **Intelligent Rebalancing**: Uses AI to analyze market conditions and determine optimal rebalancing timing
+- **Strategy Selection**: Dynamically selects the best strategy based on current market conditions
+- **Risk Profile Adaptation**: Adjusts bin range and distribution based on volatility analysis
+- **Market Trend Analysis**: Identifies market trends and positions liquidity accordingly
+- **Confidence-Based Decisions**: Provides confidence scores with recommendations for enhanced transparency
 
 ## Data Model
 

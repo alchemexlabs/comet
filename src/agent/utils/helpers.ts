@@ -151,18 +151,41 @@ export function parseStrategy(strategy: string): StrategyType {
  */
 export function parseEnvConfig(): any {
   return {
+    // Connection
     rpcUrl: process.env.RPC_URL || 'https://api.helius.xyz/v0/solanaqt',
     walletKey: process.env.COMET_WALLET_KEY || '',
+    
+    // Pool
     poolAddress: process.env.COMET_POOL_ADDRESS || '',
+    
+    // Strategy
     strategy: process.env.COMET_STRATEGY || 'Spot',
     binRange: parseInt(process.env.COMET_BIN_RANGE || '10'),
+    
+    // Rebalancing
     autoRebalance: process.env.COMET_AUTO_REBALANCE === 'true',
     minRebalanceInterval: parseInt(process.env.COMET_MIN_REBALANCE_INTERVAL || '3600000'),
     priceDeviationThreshold: parseFloat(process.env.COMET_PRICE_DEVIATION_THRESHOLD || '1.0'),
+    
+    // Fee collection
     feeCollectionInterval: parseInt(process.env.COMET_FEE_COLLECTION_INTERVAL || '86400000'),
+    
+    // General settings
     pollingInterval: parseInt(process.env.COMET_POLLING_INTERVAL || '60000'),
     maxRetries: parseInt(process.env.COMET_MAX_RETRIES || '3'),
     retryDelay: parseInt(process.env.COMET_RETRY_DELAY || '1000'),
+    
+    // Claude AI integration
+    claude: {
+      apiKey: process.env.CLAUDE_API_KEY || '',
+      model: process.env.CLAUDE_MODEL || 'claude-3-sonnet-20240229',
+      temperature: parseFloat(process.env.CLAUDE_TEMPERATURE || '0.1'),
+      maxTokens: parseInt(process.env.CLAUDE_MAX_TOKENS || '1024'),
+      enabled: process.env.CLAUDE_ENABLED === 'true',
+      riskProfile: process.env.CLAUDE_RISK_PROFILE || 'moderate'
+    },
+    
+    // Logging
     logLevel: process.env.COMET_LOG_LEVEL || 'info',
   };
 }
