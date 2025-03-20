@@ -143,6 +143,361 @@ export async function getMultipleTokenPrices(
 }
 
 /**
+ * Get token market data from Birdeye API (Starter Plan)
+ * 
+ * @param tokenMint - Token mint address
+ * @returns Detailed token market data
+ */
+export async function getTokenMarketData(
+  tokenMint: string | PublicKey
+): Promise<any> {
+  try {
+    // Validate the mint address
+    if (!tokenMint) {
+      throw new Error('Token mint address is required');
+    }
+    
+    const mintAddress = tokenMint instanceof PublicKey ? tokenMint.toString() : tokenMint;
+    
+    // Make request to Birdeye API with rate limiting
+    const response = await rateLimiter.limit('birdeye:api', () => 
+      retry(() => axios.get(
+        `${BIRDEYE_API_URL}/tokens/token_data/market_info?address=${mintAddress}`,
+        {
+          headers: {
+            'x-api-key': BIRDEYE_API_KEY,
+          },
+          timeout: 5000, // 5 second timeout
+        }
+      ))
+    );
+    
+    return response.data?.data || {};
+  } catch (error) {
+    logger.error(`Failed to get token market data: ${error.message}`);
+    throw new Error(`Failed to get token market data: ${error.message}`);
+  }
+}
+
+/**
+ * Get token information from Birdeye API (Starter Plan)
+ * 
+ * @param tokenMint - Token mint address
+ * @returns Detailed token information
+ */
+export async function getTokenInfo(
+  tokenMint: string | PublicKey
+): Promise<any> {
+  try {
+    // Validate the mint address
+    if (!tokenMint) {
+      throw new Error('Token mint address is required');
+    }
+    
+    const mintAddress = tokenMint instanceof PublicKey ? tokenMint.toString() : tokenMint;
+    
+    // Make request to Birdeye API with rate limiting
+    const response = await rateLimiter.limit('birdeye:api', () => 
+      retry(() => axios.get(
+        `${BIRDEYE_API_URL}/tokens/token_info?address=${mintAddress}`,
+        {
+          headers: {
+            'x-api-key': BIRDEYE_API_KEY,
+          },
+          timeout: 5000, // 5 second timeout
+        }
+      ))
+    );
+    
+    return response.data?.data || {};
+  } catch (error) {
+    logger.error(`Failed to get token info: ${error.message}`);
+    throw new Error(`Failed to get token info: ${error.message}`);
+  }
+}
+
+/**
+ * Get OHLCV data for a specific token (Starter Plan)
+ * 
+ * @param tokenMint - Token mint address 
+ * @param timeframe - Timeframe for OHLCV data (e.g., '1H', '4H', '1D')
+ * @param limit - Number of candles to return
+ * @returns Array of OHLCV candles
+ */
+export async function getTokenOHLCV(
+  tokenMint: string | PublicKey,
+  timeframe: string = '1H',
+  limit: number = 24
+): Promise<any[]> {
+  try {
+    // Validate the mint address
+    if (!tokenMint) {
+      throw new Error('Token mint address is required');
+    }
+    
+    const mintAddress = tokenMint instanceof PublicKey ? tokenMint.toString() : tokenMint;
+    
+    // Make request to Birdeye API with rate limiting
+    const response = await rateLimiter.limit('birdeye:api', () => 
+      retry(() => axios.get(
+        `${BIRDEYE_API_URL}/sdk/ohlcv?address=${mintAddress}&type=token&timeframe=${timeframe}&limit=${limit}`,
+        {
+          headers: {
+            'x-api-key': BIRDEYE_API_KEY,
+          },
+          timeout: 5000, // 5 second timeout
+        }
+      ))
+    );
+    
+    return response.data?.data || [];
+  } catch (error) {
+    logger.error(`Failed to get token OHLCV data: ${error.message}`);
+    throw new Error(`Failed to get token OHLCV data: ${error.message}`);
+  }
+}
+
+/**
+ * Get OHLCV data for a specific token pair (Starter Plan)
+ * 
+ * @param baseTokenMint - Base token mint address
+ * @param quoteTokenMint - Quote token mint address
+ * @param timeframe - Timeframe for OHLCV data (e.g., '1H', '4H', '1D')
+ * @param limit - Number of candles to return
+ * @returns Array of OHLCV candles
+ */
+export async function getPairOHLCV(
+  baseTokenMint: string | PublicKey,
+  quoteTokenMint: string | PublicKey,
+  timeframe: string = '1H',
+  limit: number = 24
+): Promise<any[]> {
+  try {
+    // Validate the mint addresses
+    if (!baseTokenMint || !quoteTokenMint) {
+      throw new Error('Base and quote token mint addresses are required');
+    }
+    
+    const baseAddress = baseTokenMint instanceof PublicKey ? baseTokenMint.toString() : baseTokenMint;
+    const quoteAddress = quoteTokenMint instanceof PublicKey ? quoteTokenMint.toString() : quoteTokenMint;
+    
+    // Make request to Birdeye API with rate limiting
+    const response = await rateLimiter.limit('birdeye:api', () => 
+      retry(() => axios.get(
+        `${BIRDEYE_API_URL}/sdk/ohlcv?base_address=${baseAddress}&quote_address=${quoteAddress}&type=base_quote&timeframe=${timeframe}&limit=${limit}`,
+        {
+          headers: {
+            'x-api-key': BIRDEYE_API_KEY,
+          },
+          timeout: 5000, // 5 second timeout
+        }
+      ))
+    );
+    
+    return response.data?.data || [];
+  } catch (error) {
+    logger.error(`Failed to get pair OHLCV data: ${error.message}`);
+    throw new Error(`Failed to get pair OHLCV data: ${error.message}`);
+  }
+}
+
+/**
+ * Get recent trades for a specific token (Starter Plan)
+ * 
+ * @param tokenMint - Token mint address
+ * @param limit - Number of trades to return (max 100)
+ * @returns Array of recent trades
+ */
+export async function getTokenTrades(
+  tokenMint: string | PublicKey,
+  limit: number = 20
+): Promise<any[]> {
+  try {
+    // Validate the mint address
+    if (!tokenMint) {
+      throw new Error('Token mint address is required');
+    }
+    
+    const mintAddress = tokenMint instanceof PublicKey ? tokenMint.toString() : tokenMint;
+    
+    // Make request to Birdeye API with rate limiting
+    const response = await rateLimiter.limit('birdeye:api', () => 
+      retry(() => axios.get(
+        `${BIRDEYE_API_URL}/sdk/trades?address=${mintAddress}&type=token&limit=${Math.min(limit, 100)}`,
+        {
+          headers: {
+            'x-api-key': BIRDEYE_API_KEY,
+          },
+          timeout: 5000, // 5 second timeout
+        }
+      ))
+    );
+    
+    return response.data?.data || [];
+  } catch (error) {
+    logger.error(`Failed to get token trades: ${error.message}`);
+    throw new Error(`Failed to get token trades: ${error.message}`);
+  }
+}
+
+/**
+ * Get recent trades for a specific token pair (Starter Plan)
+ * 
+ * @param baseTokenMint - Base token mint address
+ * @param quoteTokenMint - Quote token mint address
+ * @param limit - Number of trades to return (max 100)
+ * @returns Array of recent trades
+ */
+export async function getPairTrades(
+  baseTokenMint: string | PublicKey,
+  quoteTokenMint: string | PublicKey,
+  limit: number = 20
+): Promise<any[]> {
+  try {
+    // Validate the mint addresses
+    if (!baseTokenMint || !quoteTokenMint) {
+      throw new Error('Base and quote token mint addresses are required');
+    }
+    
+    const baseAddress = baseTokenMint instanceof PublicKey ? baseTokenMint.toString() : baseTokenMint;
+    const quoteAddress = quoteTokenMint instanceof PublicKey ? quoteTokenMint.toString() : quoteTokenMint;
+    
+    // Make request to Birdeye API with rate limiting
+    const response = await rateLimiter.limit('birdeye:api', () => 
+      retry(() => axios.get(
+        `${BIRDEYE_API_URL}/sdk/trades?base_address=${baseAddress}&quote_address=${quoteAddress}&type=base_quote&limit=${Math.min(limit, 100)}`,
+        {
+          headers: {
+            'x-api-key': BIRDEYE_API_KEY,
+          },
+          timeout: 5000, // 5 second timeout
+        }
+      ))
+    );
+    
+    return response.data?.data || [];
+  } catch (error) {
+    logger.error(`Failed to get pair trades: ${error.message}`);
+    throw new Error(`Failed to get pair trades: ${error.message}`);
+  }
+}
+
+/**
+ * Get wallet portfolio from Birdeye API (Starter Plan)
+ * 
+ * @param walletAddress - Wallet address
+ * @returns Wallet portfolio data
+ */
+export async function getWalletPortfolio(
+  walletAddress: string | PublicKey
+): Promise<any> {
+  try {
+    // Validate the wallet address
+    if (!walletAddress) {
+      throw new Error('Wallet address is required');
+    }
+    
+    const address = walletAddress instanceof PublicKey ? walletAddress.toString() : walletAddress;
+    
+    // Make request to Birdeye API with rate limiting
+    const response = await rateLimiter.limit('birdeye:api', () => 
+      retry(() => axios.get(
+        `${BIRDEYE_API_URL}/wallet/wallet_portfolio_info?address=${address}`,
+        {
+          headers: {
+            'x-api-key': BIRDEYE_API_KEY,
+          },
+          timeout: 10000, // 10 second timeout for portfolio info
+        }
+      ))
+    );
+    
+    return response.data?.data || {};
+  } catch (error) {
+    logger.error(`Failed to get wallet portfolio: ${error.message}`);
+    throw new Error(`Failed to get wallet portfolio: ${error.message}`);
+  }
+}
+
+/**
+ * Get wallet historical trades from Birdeye API (Starter Plan)
+ * 
+ * @param walletAddress - Wallet address
+ * @param limit - Number of trades to return (max 100)
+ * @returns Wallet historical trades
+ */
+export async function getWalletHistoricalTrades(
+  walletAddress: string | PublicKey,
+  limit: number = 50
+): Promise<any[]> {
+  try {
+    // Validate the wallet address
+    if (!walletAddress) {
+      throw new Error('Wallet address is required');
+    }
+    
+    const address = walletAddress instanceof PublicKey ? walletAddress.toString() : walletAddress;
+    
+    // Make request to Birdeye API with rate limiting
+    const response = await rateLimiter.limit('birdeye:api', () => 
+      retry(() => axios.get(
+        `${BIRDEYE_API_URL}/wallet/wallet_transaction?address=${address}&limit=${Math.min(limit, 100)}`,
+        {
+          headers: {
+            'x-api-key': BIRDEYE_API_KEY,
+          },
+          timeout: 10000, // 10 second timeout for historical trades
+        }
+      ))
+    );
+    
+    return response.data?.data || [];
+  } catch (error) {
+    logger.error(`Failed to get wallet historical trades: ${error.message}`);
+    throw new Error(`Failed to get wallet historical trades: ${error.message}`);
+  }
+}
+
+/**
+ * Get token top holders from Birdeye API (Starter Plan)
+ * 
+ * @param tokenMint - Token mint address
+ * @param limit - Number of holders to return (max 100)
+ * @returns Top token holders data
+ */
+export async function getTokenTopHolders(
+  tokenMint: string | PublicKey,
+  limit: number = 20
+): Promise<any[]> {
+  try {
+    // Validate the mint address
+    if (!tokenMint) {
+      throw new Error('Token mint address is required');
+    }
+    
+    const mintAddress = tokenMint instanceof PublicKey ? tokenMint.toString() : tokenMint;
+    
+    // Make request to Birdeye API with rate limiting
+    const response = await rateLimiter.limit('birdeye:api', () => 
+      retry(() => axios.get(
+        `${BIRDEYE_API_URL}/tokens/top_holder?address=${mintAddress}&limit=${Math.min(limit, 100)}`,
+        {
+          headers: {
+            'x-api-key': BIRDEYE_API_KEY,
+          },
+          timeout: 5000, // 5 second timeout
+        }
+      ))
+    );
+    
+    return response.data?.data || [];
+  } catch (error) {
+    logger.error(`Failed to get token top holders: ${error.message}`);
+    throw new Error(`Failed to get token top holders: ${error.message}`);
+  }
+}
+
+/**
  * Calculate price impact for a given amount and pool
  * 
  * @param inputAmount - Amount of tokens to swap

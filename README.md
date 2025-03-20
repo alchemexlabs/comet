@@ -34,11 +34,14 @@ graph TD
         CLI[CLI Interface] --> API
         API --> DB[(TimescaleDB)]
         Agent --> DB
+        MCP[MCP Server] --> Agent
     end
 
     subgraph "External Services"
         DLMM --> RPC[Helius RPC]
         Agent --> Birdeye[Birdeye API]
+        Agent --> Jupiter[Jupiter API]
+        Claude[Claude AI] --> MCP
     end
 
     subgraph "Solana Blockchain"
@@ -80,6 +83,7 @@ graph TD
 - **Dockerized Deployment**: Run the entire system with a single docker-compose command
 - **Fault Tolerance**: Robust error handling and automatic recovery mechanisms
 - **Performance Monitoring**: Real-time monitoring of positions, fees, and rebalance events
+- **Enhanced Market Data**: Integration with Birdeye Starter Plan for detailed market analytics
 
 ## Installation
 
@@ -115,6 +119,7 @@ The Docker setup includes:
 - **TimescaleDB**: PostgreSQL with TimescaleDB extension for time-series data
 - **Comet API**: REST API for managing agents and pools
 - **Comet Agent**: Background service that manages liquidity positions
+- **MCP Server**: Model Context Protocol server for Claude AI integration
 
 ## Configuration
 
@@ -126,6 +131,7 @@ RPC_URL=https://api.helius.xyz/v0/solanaqt
 HELIUS_API_KEY=your_helius_api_key
 BIRDEYE_API_KEY=your_birdeye_api_key
 BIRDEYE_API_URL=https://public-api.birdeye.so
+JUPITER_API_URL=https://price.jup.ag/v4
 
 # Wallet Configuration
 COMET_WALLET_KEY=your_wallet_private_key
@@ -150,11 +156,26 @@ CLAUDE_RISK_PROFILE=moderate  # options: conservative, moderate, aggressive
 CLAUDE_TEMPERATURE=0.1        # 0.0-1.0, lower = more deterministic
 CLAUDE_MAX_TOKENS=1024        # max tokens in response
 
+# MCP Server Configuration
+MCP_PORT=3003
+MCP_SERVER_URL=http://localhost:3003  # URL for Claude to access MCP server
+
 # API Configuration
 COMET_API_PORT=3001
 
 # Logging
 COMET_LOG_LEVEL=info  # debug, info, warn, error
+
+# Rate Limiting Configuration
+RATE_LIMIT_HELIUS_RPC=50
+RATE_LIMIT_HELIUS_SEND_TX=5
+RATE_LIMIT_HELIUS_PROGRAM_ACCTS=25
+RATE_LIMIT_HELIUS_API=10
+RATE_LIMIT_BIRDEYE_API=10
+RATE_LIMIT_JUPITER_API=50
+RATE_LIMIT_CLAUDE_API=1
+RATE_LIMIT_CLAUDE_PERIOD=10000
+RATE_LIMIT_MCP_API=10
 ```
 
 ## Usage
@@ -163,6 +184,12 @@ COMET_LOG_LEVEL=info  # debug, info, warn, error
 
 ```bash
 bun run start-agent
+```
+
+### Starting the MCP Server
+
+```bash
+bun run start-mcp-server
 ```
 
 ### Using the CLI
@@ -182,6 +209,13 @@ bun run start-agent-cli rebalance --pool <pool_address>
 
 # Collect fees
 bun run start-agent-cli collect-fees --pool <pool_address>
+```
+
+### Running Birdeye Examples
+
+```bash
+# Run the Birdeye Starter Plan example
+bun run birdeye-example
 ```
 
 ### API Endpoints
@@ -249,6 +283,48 @@ Collect fees:
 POST /pools/:poolAddress/collect-fees
 ```
 
+### MCP Server Endpoints
+
+Get token information:
+```
+GET /api/token/:address
+```
+
+Get token OHLCV data:
+```
+GET /api/token/:address/ohlcv?timeframe=1H&limit=24
+```
+
+Get token trades:
+```
+GET /api/token/:address/trades?limit=20
+```
+
+Get token pair data:
+```
+GET /api/pair/:baseAddress/:quoteAddress?timeframe=1H&limit=24
+```
+
+Get wallet portfolio:
+```
+GET /api/wallet/:address/portfolio
+```
+
+Get wallet historical trades:
+```
+GET /api/wallet/:address/trades?limit=50
+```
+
+Get token top holders:
+```
+GET /api/token/:address/holders?limit=20
+```
+
+Get all context for Claude:
+```
+GET /api/claude-context
+```
+
 ## System Components
 
 ### Comet API Service
@@ -256,6 +332,9 @@ The API service provides RESTful endpoints for managing agents, pools, and viewi
 
 ### Comet Agent
 The autonomous agent monitors pool conditions, rebalances positions, and collects fees. It runs as a standalone service and can be controlled via API or CLI.
+
+### MCP Server
+The Model Context Protocol (MCP) server allows Claude AI to access additional context without consuming context tokens. It provides market data, portfolio information, and other relevant data.
 
 ### TimescaleDB
 PostgreSQL with TimescaleDB extension provides high-performance time-series data storage for:
@@ -280,6 +359,41 @@ The Comet agent integrates with Anthropic's Claude AI to enhance decision-making
 - **Risk Profile Adaptation**: Adjusts bin range and distribution based on volatility analysis
 - **Market Trend Analysis**: Identifies market trends and positions liquidity accordingly
 - **Confidence-Based Decisions**: Provides confidence scores with recommendations for enhanced transparency
+
+## Birdeye Starter Plan Integration
+
+Comet integrates with Birdeye's Starter Plan API to access enhanced market data and analytics:
+
+### Available Data Sources
+
+- **Token Information**: Detailed metadata and trading attributes for any Solana token
+- **Market Data**: Real-time market metrics including volume, liquidity, and trends
+- **OHLCV Data**: High-quality candlestick data for tokens and pairs at various timeframes
+- **Trade History**: Recent trades for specific tokens and trading pairs
+- **Wallet Analytics**: Portfolio composition and historical trades for any wallet
+- **Top Holders**: Ownership distribution for tokens
+
+### MCP Integration
+
+All Birdeye data is exposed through the MCP server, allowing Claude AI to access it when making rebalancing decisions. This provides Claude with richer context about market conditions without consuming context tokens.
+
+### Usage Example
+
+The `birdeye-example` script demonstrates how to use the Birdeye Starter Plan API:
+
+```typescript
+// Get token information
+const tokenInfo = await getTokenInfo(SOL_MINT);
+
+// Get OHLCV data (1 hour candles)
+const ohlcvData = await getTokenOHLCV(SOL_MINT, '1H', 5);
+
+// Get pair trades (SOL/USDC)
+const pairTrades = await getPairTrades(SOL_MINT, USDC_MINT, 5);
+
+// Get wallet portfolio
+const portfolio = await getWalletPortfolio(WALLET_ADDRESS);
+```
 
 ## Data Model
 
@@ -370,6 +484,7 @@ erDiagram
         boolean success
         string error_message
     }
+}
 ```
 
 ## Contributing

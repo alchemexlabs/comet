@@ -19,7 +19,9 @@
     "start-agent": "bun src/agent/server.ts",
     "start-agent-cli": "bun src/agent/cli.ts",
     "start-comet-agent": "bun -r dotenv/config src/agent/cli-agent.ts",
-    "test-real-money": "bun -r dotenv/config src/examples/test_real_money.ts"
+    "test-real-money": "bun -r dotenv/config src/examples/test_real_money.ts",
+    "start-mcp-server": "bun -r dotenv/config src/mcp-server/index.ts",
+    "birdeye-example": "bun -r dotenv/config src/examples/birdeye_starter_example.ts"
   },
   "devDependencies": {
     "@babel/preset-env": "^7.22.5",
