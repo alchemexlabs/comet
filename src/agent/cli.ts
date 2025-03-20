@@ -64,6 +64,18 @@ program
       // Initialize the agent
       const agent = new Comet(config);
       
+      // Setup error handlers
+      process.on('uncaughtException', (error) => {
+        logger.error('Uncaught exception:', error);
+        agent.stop();
+        process.exit(1);
+      });
+      
+      process.on('unhandledRejection', (reason, promise) => {
+        logger.error('Unhandled rejection at:', promise, 'reason:', reason);
+        // Don't exit immediately for unhandled rejections
+      });
+      
       // Setup graceful shutdown
       process.on('SIGINT', () => {
         logger.info('Shutting down Comet agent...');

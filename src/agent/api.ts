@@ -5,13 +5,14 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { validator } from 'hono/validator';
 import { logger } from './utils/logger';
 import { PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { StrategyType } from '../dlmm/types';
 import { Comet } from './index';
 import { CometConfig, AgentStatus } from './types';
-import { parseEnvConfig } from './utils/helpers';
+import { parseEnvConfig, retry } from './utils/helpers';
 
 // Create Hono app
 const app = new Hono();
@@ -27,6 +28,10 @@ const envConfig = parseEnvConfig();
 
 // Helper to get agent by pool address or create new one
 async function getOrCreateAgent(poolAddress: string): Promise<Comet> {
+  if (!poolAddress || !PublicKey.isOnCurve(poolAddress)) {
+    throw new Error(`Invalid pool address: ${poolAddress}`);
+  }
+
   if (agents.has(poolAddress)) {
     return agents.get(poolAddress);
   }
@@ -36,11 +41,23 @@ async function getOrCreateAgent(poolAddress: string): Promise<Comet> {
     poolAddress
   };
   
-  const agent = new Comet(config);
-  await agent.initialize();
-  agents.set(poolAddress, agent);
-  
-  return agent;
+  try {
+    const agent = new Comet(config);
+    await retry(
+      async () => agent.initialize(),
+      envConfig.maxRetries,
+      envConfig.retryDelay,
+      (error, attempt) => {
+        logger.warn(`Attempt ${attempt} to initialize agent for pool ${poolAddress} failed: ${error.message}`);
+      }
+    );
+    
+    agents.set(poolAddress, agent);
+    return agent;
+  } catch (error) {
+    logger.error(`Failed to initialize agent for pool ${poolAddress}:`, error);
+    throw new Error(`Failed to initialize agent: ${error.message}`);
+  }
 }
 
 // Root endpoint
@@ -52,14 +69,52 @@ app.get('/', (c) => {
   });
 });
 
+// Validate start agent request
+const startAgentValidator = validator('json', (value, c) => {
+  const errors = [];
+  
+  if (!value.poolAddress) {
+    errors.push('Pool address is required');
+  } else {
+    try {
+      // Verify it's a valid public key
+      new PublicKey(value.poolAddress);
+    } catch (e) {
+      errors.push('Invalid pool address format');
+    }
+  }
+  
+  if (value.strategy && !['Spot', 'BidAsk', 'Curve'].includes(value.strategy)) {
+    errors.push('Strategy must be one of: Spot, BidAsk, Curve');
+  }
+  
+  if (value.binRange && (typeof value.binRange !== 'number' || value.binRange <= 0)) {
+    errors.push('Bin range must be a positive number');
+  }
+  
+  if (value.autoRebalance !== undefined && typeof value.autoRebalance !== 'boolean') {
+    errors.push('Auto rebalance must be a boolean');
+  }
+  
+  if (errors.length > 0) {
+    return [null, errors];
+  }
+  
+  return [value, null];
+});
+
 // Start agent
-app.post('/agents/start', async (c) => {
+app.post('/agents/start', startAgentValidator, async (c) => {
   try {
-    const body = await c.req.json();
-    const { poolAddress, strategy, binRange, autoRebalance } = body;
+    const validatedData = c.req.valid('json');
+    const { poolAddress, strategy, binRange, autoRebalance } = validatedData;
     
-    if (!poolAddress) {
-      return c.json({ error: 'Pool address is required' }, 400);
+    // Check if agent is already running
+    if (agents.has(poolAddress)) {
+      return c.json({ 
+        status: 'warning',
+        message: `Agent for pool ${poolAddress} is already running` 
+      }, 200);
     }
     
     const config: CometConfig = {
@@ -71,26 +126,52 @@ app.post('/agents/start', async (c) => {
     };
     
     const agent = new Comet(config);
-    agents.set(poolAddress, agent);
     
-    // Start agent in background
-    agent.start().catch((err) => {
-      logger.error(`Agent error for pool ${poolAddress}:`, err);
-    });
-    
-    return c.json({
-      status: 'success',
-      message: `Agent started for pool ${poolAddress}`,
-      config: {
-        poolAddress,
-        strategy: config.strategy,
-        binRange: config.binRange,
-        autoRebalance: config.autoRebalance
-      }
-    });
+    try {
+      // Initialize agent first to ensure pool is valid before starting
+      await agent.initialize();
+      agents.set(poolAddress, agent);
+      
+      // Start agent in background
+      agent.start().catch((err) => {
+        logger.error(`Agent error for pool ${poolAddress}:`, err);
+        // Remove failed agent from the registry
+        agents.delete(poolAddress);
+      });
+      
+      return c.json({
+        status: 'success',
+        message: `Agent started for pool ${poolAddress}`,
+        config: {
+          poolAddress,
+          strategy: config.strategy,
+          binRange: config.binRange,
+          autoRebalance: config.autoRebalance
+        }
+      });
+    } catch (initError) {
+      logger.error(`Failed to initialize agent for pool ${poolAddress}:`, initError);
+      return c.json({ 
+        status: 'error',
+        error: `Failed to initialize agent: ${initError.message}`,
+        details: initError.stack
+      }, 400);
+    }
   } catch (error) {
+    if (Array.isArray(error)) {
+      // Validation errors
+      return c.json({ 
+        status: 'error',
+        error: 'Validation failed',
+        details: error 
+      }, 400);
+    }
+    
     logger.error('Failed to start agent:', error);
-    return c.json({ error: error.message }, 500);
+    return c.json({ 
+      status: 'error',
+      error: `Server error: ${error.message}` 
+    }, 500);
   }
 });
 

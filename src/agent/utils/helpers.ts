@@ -46,26 +46,51 @@ export function sleep(ms: number): Promise<void> {
  * @param fn - Function to retry
  * @param maxRetries - Maximum number of retries
  * @param initialDelay - Initial delay in milliseconds
+ * @param onRetry - Optional callback that runs before each retry with current attempt number
  * @returns Promise of the function result
  */
 export async function retry<T>(
   fn: () => Promise<T>,
   maxRetries = 3,
-  initialDelay = 1000
+  initialDelay = 1000,
+  onRetry?: (error: Error, attempt: number) => void
 ): Promise<T> {
   let retries = 0;
+  let lastError: Error;
   
   while (true) {
     try {
       return await fn();
     } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
       if (retries >= maxRetries) {
-        throw error;
+        // Add context to the error about retry attempts
+        const enrichedError = new Error(
+          `Operation failed after ${retries + 1} attempts. Last error: ${lastError.message}`
+        );
+        enrichedError.stack = lastError.stack;
+        enrichedError.cause = lastError;
+        throw enrichedError;
       }
       
       retries++;
       const delay = initialDelay * Math.pow(2, retries - 1);
-      await sleep(delay);
+      
+      // Add jitter to prevent thundering herd problems
+      const jitteredDelay = delay * (0.8 + Math.random() * 0.4);
+      
+      // Call the onRetry callback if provided
+      if (onRetry) {
+        try {
+          onRetry(lastError, retries);
+        } catch (callbackError) {
+          // Don't let callback errors affect the retry logic
+          console.error('Error in retry callback:', callbackError);
+        }
+      }
+      
+      await sleep(jitteredDelay);
     }
   }
 }

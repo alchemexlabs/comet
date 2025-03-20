@@ -235,27 +235,51 @@ export class Comet {
 
       // Main loop
       while (this.isRunning) {
-        // Refresh DLMM state
-        if (this.dlmm) {
-          await this.dlmm.refetchStates();
-        }
+        try {
+          // Refresh DLMM state
+          if (this.dlmm) {
+            try {
+              await this.dlmm.refetchStates();
+            } catch (refreshError) {
+              logger.error('Failed to refresh DLMM state, will retry next cycle:', refreshError);
+              // Continue to next iteration rather than failing the entire agent
+              await sleep(this.config.pollingInterval || 60000);
+              continue;
+            }
+          }
 
-        // Check if rebalance is needed
-        if (this.shouldRebalance()) {
-          await this.rebalance();
-        }
+          // Check if rebalance is needed
+          if (this.shouldRebalance()) {
+            try {
+              await this.rebalance();
+            } catch (rebalanceError) {
+              logger.error('Rebalance operation failed:', rebalanceError);
+              // Don't throw, continue with the next operation
+            }
+          }
 
-        // Collect fees periodically
-        if (this.shouldCollectFees()) {
-          await this.collectFees();
-        }
+          // Collect fees periodically
+          if (this.shouldCollectFees()) {
+            try {
+              await this.collectFees();
+            } catch (feeError) {
+              logger.error('Fee collection failed:', feeError);
+              // Don't throw, continue with the next cycle
+            }
+          }
 
-        // Wait before next iteration
-        await sleep(this.config.pollingInterval || 60000);
+          // Wait before next iteration
+          await sleep(this.config.pollingInterval || 60000);
+        } catch (cycleError) {
+          // This catch will handle any errors not caught by the individual operation handlers
+          logger.error('Error in agent cycle, will continue running:', cycleError);
+          await sleep(this.config.retryDelay || 5000); // Shorter delay on error before next attempt
+        }
       }
     } catch (error) {
       this.isRunning = false;
-      logger.error('Agent error:', error);
+      logger.error('Fatal agent error:', error);
+      // Optionally add notification to external monitoring system here
       throw error;
     }
   }
