@@ -1,361 +1,159 @@
-# DLMM SDK
+# Comet - Autonomous Liquidity Agent for Meteora DLMM
 
 <p align="center">
 <img align="center" src="https://app.meteora.ag/icons/logo.svg" width="180" height="180" />
 </p>
 <br>
 
-## Getting started
+Comet is an autonomous trading agent for Solana's Meteora protocol, designed to create a perpetual money machine by providing concentrated liquidity on Meteora's DLMM (Dynamic Liquidity Market Maker) pools.
 
-NPM: https://www.npmjs.com/package/@meteora-ag/dlmm
+## Features
 
-SDK: https://github.com/MeteoraAg/dlmm-sdk
+- **Automated Pool Management**: Create and manage DLMM pools with specified parameters
+- **Intelligent Liquidity Provision**: Add liquidity concentrated around the current price for maximum fee earnings
+- **Dynamic Rebalancing**: Monitor pool prices and automatically rebalance positions
+- **Fee Collection**: Collect and reinvest trading fees to compound returns
+- **Multiple Strategies**: Support for Spot, BidAsk, and Curve liquidity distribution strategies
+- **REST API and CLI**: Manage your agents through an API or command line interface
 
-<!-- Docs: https://docs.mercurial.finance/mercurial-dynamic-yield-infra/ -->
+## Installation
 
-Discord: https://discord.com/channels/841152225564950528/864859354335412224
+```bash
+# Install dependencies
+bun install
 
-## Install
-
-1. Install deps
-
-```
-npm i @meteora-ag/dlmm @coral-xyz/anchor @solana/web3.js
-```
-
-2. Initialize DLMM instance
-
-```ts
-import DLMM from '@meteora-ag/dlmm'
-
-const USDC_USDT_POOL = new PublicKey('ARwi1S4DaiTG5DX7S4M4ZsrXqpMD1MrTmbu9ue2tpmEq') // You can get your desired pool address from the API https://dlmm-api.meteora.ag/pair/all
-const dlmmPool = await DLMM.create(connection, USDC_USDT_POOL);
-
-// If you need to create multiple, can consider using `createMultiple`
-const dlmmPool = await DLMM.createMultiple(connection, [USDC_USDT_POOL, ...]);
-
+# Build the project
+bun run build
 ```
 
-3. To interact with the AmmImpl
+## Configuration
 
-- Get Active Bin
+Create a `.env` file based on `.env.example`:
 
-```ts
-const activeBin = await dlmmPool.getActiveBin();
-const activeBinPriceLamport = activeBin.price;
-const activeBinPricePerToken = dlmmPool.fromPricePerLamport(
-  Number(activeBin.price)
-);
+```
+HELIUS_API_KEY=your_helius_api_key
+BIRDEYE_API_KEY=your_birdeye_api_key
+RPC_URL=https://api.helius.xyz/v0/solanaqt
+BIRDEYE_API_URL=https://public-api.birdeye.so
+
+# Comet Agent Configuration
+COMET_WALLET_KEY=your_wallet_private_key
+COMET_POOL_ADDRESS=your_pool_address
+COMET_STRATEGY=Spot  # Options: Spot, BidAsk, Curve
+COMET_AUTO_REBALANCE=true
+COMET_BIN_RANGE=10
+COMET_MIN_REBALANCE_INTERVAL=3600000
+COMET_PRICE_DEVIATION_THRESHOLD=1.0
+COMET_FEE_COLLECTION_INTERVAL=86400000
+COMET_POLLING_INTERVAL=60000
+COMET_MAX_RETRIES=3
+COMET_RETRY_DELAY=1000
+COMET_LOG_LEVEL=info
+COMET_API_PORT=3001
 ```
 
-- Create Balance Position
+## Usage
 
-```ts
-const TOTAL_RANGE_INTERVAL = 10; // 10 bins on each side of the active bin
-const minBinId = activeBin.binId - TOTAL_RANGE_INTERVAL;
-const maxBinId = activeBin.binId + TOTAL_RANGE_INTERVAL;
+### Starting the Agent API Server
 
-const totalXAmount = new BN(100 * 10 ** baseMint.decimals);
-const totalYAmount = autoFillYByStrategy(
-  activeBin.binId,
-  dlmmPool.lbPair.binStep,
-  totalXAmount,
-  activeBin.xAmount,
-  activeBin.yAmount,
-  minBinId,
-  maxBinId,
-  StrategyType.Spot // can be StrategyType.Spot, StrategyType.BidAsk, StrategyType.Curve
-);
-const newBalancePosition = new Keypair();
-
-// Create Position
-const createPositionTx =
-  await dlmmPool.initializePositionAndAddLiquidityByStrategy({
-    positionPubKey: newBalancePosition.publicKey,
-    user: user.publicKey,
-    totalXAmount,
-    totalYAmount,
-    strategy: {
-      maxBinId,
-      minBinId,
-      strategyType: StrategyType.Spot, // can be StrategyType.Spot, StrategyType.BidAsk, StrategyType.Curve
-    },
-  });
-
-try {
-  const createBalancePositionTxHash = await sendAndConfirmTransaction(
-    connection,
-    createPositionTx,
-    [user, newBalancePosition]
-  );
-} catch (error) {}
+```bash
+bun run start-agent
 ```
 
-- Create Imbalance Position
+### Using the CLI
 
-```ts
-const TOTAL_RANGE_INTERVAL = 10; // 10 bins on each side of the active bin
-const minBinId = activeBin.binId - TOTAL_RANGE_INTERVAL;
-const maxBinId = activeBin.binId + TOTAL_RANGE_INTERVAL;
+```bash
+# Start an agent for a specific pool
+bun run start-agent-cli start --pool <pool_address> --strategy Spot --auto-rebalance true
 
-const totalXAmount = new BN(100 * 10 ** baseMint.decimals);
-const totalYAmount = new BN(0.5 * 10 ** 9); // SOL
-const newImbalancePosition = new Keypair();
+# Create a new DLMM pool
+bun run start-agent-cli create-pool --token-x <token_x_address> --token-y <token_y_address> --bin-step 20 --active-id 8388608 --fee-bps 20
 
-// Create Position
-const createPositionTx =
-  await dlmmPool.initializePositionAndAddLiquidityByStrategy({
-    positionPubKey: newImbalancePosition.publicKey,
-    user: user.publicKey,
-    totalXAmount,
-    totalYAmount,
-    strategy: {
-      maxBinId,
-      minBinId,
-      strategyType: StrategyType.Spot, // can be StrategyType.Spot, StrategyType.BidAsk, StrategyType.Curve
-    },
-  });
+# Add liquidity to a pool
+bun run start-agent-cli add-liquidity --pool <pool_address> --amount-x 100000000 --amount-y 100000000 --strategy Spot --range 10
 
-try {
-  const createBalancePositionTxHash = await sendAndConfirmTransaction(
-    connection,
-    createPositionTx,
-    [user, newImbalancePosition]
-  );
-} catch (error) {}
+# Manually rebalance positions
+bun run start-agent-cli rebalance --pool <pool_address>
+
+# Collect fees
+bun run start-agent-cli collect-fees --pool <pool_address>
 ```
 
-- Create One Side Position
+### API Endpoints
 
-```ts
-const TOTAL_RANGE_INTERVAL = 10; // 10 bins on each side of the active bin
-const minBinId = activeBin.binId;
-const maxBinId = activeBin.binId + TOTAL_RANGE_INTERVAL * 2;
-
-const totalXAmount = new BN(100 * 10 ** baseMint.decimals);
-const totalYAmount = new BN(0);
-const newOneSidePosition = new Keypair();
-
-// Create Position
-const createPositionTx =
-  await dlmmPool.initializePositionAndAddLiquidityByStrategy({
-    positionPubKey: newOneSidePosition.publicKey,
-    user: user.publicKey,
-    totalXAmount,
-    totalYAmount,
-    strategy: {
-      maxBinId,
-      minBinId,
-      strategyType: StrategyType.Spot, // can be StrategyType.Spot, StrategyType.BidAsk, StrategyType.Curve
-    },
-  });
-
-try {
-  const createOneSidePositionTxHash = await sendAndConfirmTransaction(
-    connection,
-    createPositionTx,
-    [user, newOneSidePosition]
-  );
-} catch (error) {}
+Start an agent:
 ```
-
-- Get list of positions
-
-```ts
-const { userPositions } = await dlmmPool.getPositionsByUserAndLbPair(
-  user.publicKey
-);
-const binData = userPositions[0].positionData.positionBinData;
-```
-
-- Add liquidity to existing position
-
-```ts
-const TOTAL_RANGE_INTERVAL = 10; // 10 bins on each side of the active bin
-const minBinId = activeBin.binId - TOTAL_RANGE_INTERVAL;
-const maxBinId = activeBin.binId + TOTAL_RANGE_INTERVAL;
-
-const totalXAmount = new BN(100 * 10 ** baseMint.decimals);
-const totalYAmount = autoFillYByStrategy(
-  activeBin.binId,
-  dlmmPool.lbPair.binStep,
-  totalXAmount,
-  activeBin.xAmount,
-  activeBin.yAmount,
-  minBinId,
-  maxBinId,
-  StrategyType.Spot // can be StrategyType.Spot, StrategyType.BidAsk, StrategyType.Curve
-);
-
-// Add Liquidity to existing position
-const addLiquidityTx = await dlmmPool.addLiquidityByStrategy({
-  positionPubKey: newBalancePosition.publicKey,
-  user: user.publicKey,
-  totalXAmount,
-  totalYAmount,
-  strategy: {
-    maxBinId,
-    minBinId,
-    strategyType: StrategyType.Spot, // can be StrategyType.Spot, StrategyType.BidAsk, StrategyType.Curve
-  },
-});
-
-try {
-  const addLiquidityTxHash = await sendAndConfirmTransaction(
-    connection,
-    addLiquidityTx,
-    [user]
-  );
-} catch (error) {}
-```
-
-- Remove Liquidity
-
-```ts
-const userPosition = userPositions.find(({ publicKey }) =>
-  publicKey.equals(newBalancePosition.publicKey)
-);
-// Remove Liquidity
-const binIdsToRemove = userPosition.positionData.positionBinData.map(
-  (bin) => bin.binId
-);
-const removeLiquidityTx = await dlmmPool.removeLiquidity({
-  position: userPosition.publicKey,
-  user: user.publicKey,
-  binIds: binIdsToRemove,
-  liquiditiesBpsToRemove: new Array(binIdsToRemove.length).fill(
-    new BN(100 * 100)
-  ), // 100% (range from 0 to 100)
-  shouldClaimAndClose: true, // should claim swap fee and close position together
-});
-
-try {
-  for (let tx of Array.isArray(removeLiquidityTx)
-    ? removeLiquidityTx
-    : [removeLiquidityTx]) {
-    const removeBalanceLiquidityTxHash = await sendAndConfirmTransaction(
-      connection,
-      tx,
-      [user],
-      { skipPreflight: false, preflightCommitment: "singleGossip" }
-    );
-  }
-} catch (error) {}
-```
-
-- Claim Fee
-
-```ts
-async function claimFee(dlmmPool: DLMM) {
-  const claimFeeTxs = await dlmmPool.claimAllSwapFee({
-    owner: user.publicKey,
-    positions: userPositions,
-  });
-
-  try {
-    for (const claimFeeTx of claimFeeTxs) {
-      const claimFeeTxHash = await sendAndConfirmTransaction(
-        connection,
-        claimFeeTx,
-        [user]
-      );
-    }
-  } catch (error) {}
+POST /agents/start
+{
+  "poolAddress": "ARwi1S4DaiTG5DX7S4M4ZsrXqpMD1MrTmbu9ue2tpmEq",
+  "strategy": "Spot",
+  "binRange": 10,
+  "autoRebalance": true
 }
 ```
 
-- Close Position
-
-```ts
-const closePositionTx = await dlmmPool.closePosition({
-  owner: user.publicKey,
-  position: newBalancePosition.publicKey,
-});
-
-try {
-  const closePositionTxHash = await sendAndConfirmTransaction(
-    connection,
-    closePositionTx,
-    [user],
-    { skipPreflight: false, preflightCommitment: "singleGossip" }
-  );
-} catch (error) {}
+Stop an agent:
+```
+POST /agents/stop
+{
+  "poolAddress": "ARwi1S4DaiTG5DX7S4M4ZsrXqpMD1MrTmbu9ue2tpmEq"
+}
 ```
 
-- Swap
-
-```ts
-const swapAmount = new BN(0.1 * 10 ** 9);
-// Swap quote
-const swapYtoX = true;
-const binArrays = await dlmmPool.getBinArrayForSwap(swapYtoX);
-
-const swapQuote = await dlmmPool.swapQuote(
-  swapAmount,
-  swapYtoX,
-  new BN(1),
-  binArrays
-);
-
-// Swap
-const swapTx = await dlmmPool.swap({
-  inToken: dlmmPool.tokenX.publicKey,
-  binArraysPubkey: swapQuote.binArraysPubkey,
-  inAmount: swapAmount,
-  lbPair: dlmmPool.pubkey,
-  user: user.publicKey,
-  minOutAmount: swapQuote.minOutAmount,
-  outToken: dlmmPool.tokenY.publicKey,
-});
-
-try {
-  const swapTxHash = await sendAndConfirmTransaction(connection, swapTx, [
-    user,
-  ]);
-} catch (error) {}
+Get agent status:
+```
+GET /agents/:poolAddress/status
 ```
 
-## Static functions
+Create a pool:
+```
+POST /pools/create
+{
+  "tokenX": "So11111111111111111111111111111111111111112",
+  "tokenY": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+  "binStep": 20,
+  "activeId": 8388608,
+  "feeBps": 20,
+  "activationType": 1,
+  "hasAlphaVault": false
+}
+```
 
-| Function                      | Description                                                                        | Return                               |
-| ----------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------ |
-| `create`                      | Given the DLMM address, create an instance to access the state and functions       | `Promise<DLMM>`                      |
-| `createMultiple`              | Given a list of DLMM addresses, create instances to access the state and functions | `Promise<Array<DLMM>>`               |
-| `getAllPresetParameters`      | Get all the preset params (use to create DLMM pool)                                | `Promise<PresetParams>`              |
-| `createPermissionLbPair`      | Create DLMM Pool                                                                   | `Promise<Transcation>`               |
-| `getClaimableLMReward`        | Get Claimable LM reward for a position                                             | `Promise<LMRewards>`                 |
-| `getClaimableSwapFee`         | Get Claimable Swap Fee for a position                                              | `Promise<SwapFee>`                   |
-| `getAllLbPairPositionsByUser` | Get user's all positions for all DLMM pools                                        | `Promise<Map<string, PositionInfo>>` |
+Add liquidity:
+```
+POST /pools/:poolAddress/add-liquidity
+{
+  "amountX": "100000000",
+  "amountY": "100000000",
+  "strategy": "Spot",
+  "binRange": 10
+}
+```
 
-## DLMM instance functions
+Rebalance positions:
+```
+POST /pools/:poolAddress/rebalance
+```
 
-| Function                                      | Description                                                                                                                   | Return                                                                                             |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `refetchStates`                               | Update onchain state of DLMM instance. It's recommend to call this before interact with the program (Deposit/ Withdraw/ Swap) | `Promise<void>`                                                                                    |
-| `getBinArrays`                                | Retrieves List of Bin Arrays                                                                                                  | `Promise<BinArrayAccount[]>`                                                                       |
-| `getBinArrayForSwap`                          | Retrieves List of Bin Arrays for swap purpose                                                                                 | `Promise<BinArrayAccount[]>`                                                                       |
-| `getFeeInfo`                                  | Retrieves LbPair's fee info including `base fee`, `protocol fee` & `max fee`                                                  | `FeeInfo`                                                                                          |
-| `getDynamicFee`                               | Retrieves LbPair's dynamic fee                                                                                                | `Decimal`                                                                                          |
-| `getBinsAroundActiveBin`                      | retrieves a specified number of bins to the left and right of the active bin and returns them along with the active bin ID.   | `Promise<{ activeBin: number; bins: BinLiquidity[] }>`                                             |
-| `getBinsBetweenMinAndMaxPrice`                | Retrieves a list of bins within a specified price                                                                             | `Promise<{ activeBin: number; bins: BinLiquidity[] }>`                                             |
-| `getBinsBetweenLowerAndUpperBound`            | retrieves a list of bins between a lower and upper bin ID and returns the active bin ID and the list of bins.                 | `Promise<{ activeBin: number; bins: BinLiquidity[] }>`                                             |
-| `toPricePerLamport`                           | Converts a real price of bin to lamport price                                                                                 | `string`                                                                                           |
-| `fromPricePerLamport`                         | converts a price per lamport value to a real price of bin                                                                     | `string`                                                                                           |
-| `getActiveBin`                                | Retrieves the active bin ID and its corresponding price                                                                       | `Promise<{ binId: number; price: string }>`                                                        |
-| `getPriceOfBinByBinId`                        | Get the price of a bin based on its bin ID                                                                                    | `string`                                                                                           |
-| `getBinIdFromPrice`                           | get bin ID based on a given price and a boolean flag indicating whether to round down or up.                                  | `number`                                                                                           |
-| `getPositionsByUserAndLbPair`                 | Retrieves positions by user and LB pair, including active bin and user positions.                                             | `Promise<{ activeBin: { binId: any; price: string; }; userPositions: Array<Position>;}>`           |
-| `initializePositionAndAddLiquidityByStrategy` | Initializes a position and adds liquidity                                                                                     | `Promise<Transaction\|Transaction[]>`                                                              |
-| `addLiquidityByStrategy`                      | Add liquidity to existing position                                                                                            | `Promise<Transaction\|Transaction[]>`                                                              |
-| `removeLiquidity`                             | function is used to remove liquidity from a position, with the option to claim rewards and close the position.                | `Promise<Transaction\|Transaction[]>`                                                              |
-| `closePosition`                               | Closes a position                                                                                                             | `Promise<Transaction\|Transaction[]>`                                                              |
-| `swapQuote`                                   | Quote for a swap                                                                                                              | `SwapQuote`                                                                                        |
-| `swap`                                        | Swap token within the LbPair                                                                                                  | `Promise<Transaction>`                                                                             |
-| `claimLMReward`                               | Claim rewards for a specific position owned by a specific owner                                                               | `Promise<Transaction>`                                                                             |
-| `claimAllLMRewards`                           | Claim all liquidity mining rewards for a given owner and their positions.                                                     | `Promise<Transaction[]>`                                                                           |
-| `claimSwapFee`                                | Claim swap fees for a specific position owned by a specific owner                                                             | `Promise<Transaction>`                                                                             |
-| `claimAllSwapFee`                             | Claim swap fees for multiple positions owned by a specific owner                                                              | `Promise<Transaction>`                                                                             |
-| `claimAllRewards`                             | Claim swap fees and LM rewards for multiple positions owned by a specific owner                                               | `Promise<Transaction[]>`                                                                           |
-| `syncWithMarketPrice`                         | Sync the pool current active bin to match nearest market price bin                                                            | `Promise<Transaction>`                                                                             |
-| `getPairPubkeyIfExists`                       | Get existing pool address given parameter, if not return null                                                                 | `Promise<PublicKey                                                                       \| null>` |
-| `getMaxPriceInBinArrays`                      | Get max price of the last bin that has liquidity given bin arrays                                                             | `Promise<string                                                                       \| null>`    |
+Collect fees:
+```
+POST /pools/:poolAddress/collect-fees
+```
+
+## Strategies
+
+- **Spot**: Distributes liquidity evenly around the active bin
+- **BidAsk**: Concentrates liquidity at the active bin and spreads out
+- **Curve**: Distributes liquidity in a normal distribution around the active bin
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+ISC
+
+## Credits
+
+Built with the [Meteora DLMM SDK](https://github.com/MeteoraAg/dlmm-sdk)

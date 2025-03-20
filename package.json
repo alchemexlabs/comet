@@ -11,11 +11,13 @@
   ],
   "scripts": {
     "build": "tsup",
-    "start": "npm run build -- --watch",
+    "start": "bun run build -- --watch",
     "test": "jest 'src/test/(ilm|sdk|position_managed_by_operator|decode|single_bin).test.ts'",
     "unit-test": "jest src/test/calculate_distribution.test.ts",
-    "example": "dotenv -e .env npx ts-node src/examples/example.ts",
-    "start-server": "npx tsc && node dist/src/server/index.js"
+    "example": "dotenv -e .env bun src/examples/example.ts",
+    "start-server": "bun src/server/index.ts",
+    "start-agent": "bun src/agent/server.ts",
+    "start-agent-cli": "bun src/agent/cli.ts"
   },
   "devDependencies": {
     "@babel/preset-env": "^7.22.5",
@@ -35,14 +37,19 @@
   "dependencies": {
     "@coral-xyz/anchor": "^0.28.0",
     "@coral-xyz/borsh": "^0.28.0",
+    "@hono/node-server": "^1.8.2",
     "@meteora-ag/dlmm": "^1.4.2",
     "@solana/buffer-layout": "^4.0.1",
     "@solana/spl-token": "^0.4.6",
     "@solana/web3.js": "^1.98.0",
+    "axios": "^1.6.8",
     "bn.js": "^5.2.1",
+    "bs58": "^5.0.0",
+    "commander": "^12.0.0",
     "decimal.js": "^10.4.2",
     "express": "^4.19.2",
-    "gaussian": "^1.3.0"
+    "gaussian": "^1.3.0",
+    "hono": "^4.1.5"
   },
   "keywords": [],
   "author": "McSam",
