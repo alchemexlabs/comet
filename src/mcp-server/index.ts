@@ -6,32 +6,37 @@
  * and other relevant data.
  */
 
-const express = require('express');
-const app = express();
-const PORT = process.env.MCP_PORT || 3003;
+import { Hono } from 'hono';
+import { serve } from '@hono/node-server';
+import { cors } from 'hono/cors';
+import { logger } from 'hono/logger';
 
-// Middleware
-app.use(express.json());
+// Create Hono app
+const app = new Hono();
+
+// Add middleware
+app.use('*', logger());
+app.use('*', cors());
 
 // Market data cache
-let marketDataCache = {};
-let portfolioCache = {};
-let poolsCache = {};
+const marketDataCache: Record<string, any> = {};
+let portfolioCache: Record<string, any> = {};
+let poolsCache: Record<string, any> = {};
 
 // Routes
-app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'Comet MCP Server' });
+app.get('/', (c) => {
+  return c.json({ status: 'ok', service: 'Comet MCP Server' });
 });
 
 /**
  * Endpoint to get market data for a specific token pair
  */
-app.get('/api/market/:tokenX/:tokenY', (req, res) => {
-  const { tokenX, tokenY } = req.params;
+app.get('/api/market/:tokenX/:tokenY', (c) => {
+  const { tokenX, tokenY } = c.req.param();
   const pairKey = `${tokenX}/${tokenY}`;
   
   // Return cached data or empty structure
-  res.json(marketDataCache[pairKey] || {
+  return c.json(marketDataCache[pairKey] || {
     tokenX,
     tokenY,
     price: null,
@@ -47,24 +52,24 @@ app.get('/api/market/:tokenX/:tokenY', (req, res) => {
 /**
  * Endpoint to update market data
  */
-app.post('/api/market/:tokenX/:tokenY', (req, res) => {
-  const { tokenX, tokenY } = req.params;
+app.post('/api/market/:tokenX/:tokenY', async (c) => {
+  const { tokenX, tokenY } = c.req.param();
   const pairKey = `${tokenX}/${tokenY}`;
-  const data = req.body;
+  const data = await c.req.json();
   
   marketDataCache[pairKey] = {
     ...data,
     timestamp: Date.now()
   };
   
-  res.json({ success: true, message: `Market data updated for ${pairKey}` });
+  return c.json({ success: true, message: `Market data updated for ${pairKey}` });
 });
 
 /**
  * Endpoint to get portfolio data
  */
-app.get('/api/portfolio', (req, res) => {
-  res.json(portfolioCache || {
+app.get('/api/portfolio', (c) => {
+  return c.json(portfolioCache || {
     positions: [],
     totalValue: 0,
     timestamp: Date.now(),
@@ -75,22 +80,22 @@ app.get('/api/portfolio', (req, res) => {
 /**
  * Endpoint to update portfolio data
  */
-app.post('/api/portfolio', (req, res) => {
-  const data = req.body;
+app.post('/api/portfolio', async (c) => {
+  const data = await c.req.json();
   
   portfolioCache = {
     ...data,
     timestamp: Date.now()
   };
   
-  res.json({ success: true, message: "Portfolio data updated" });
+  return c.json({ success: true, message: "Portfolio data updated" });
 });
 
 /**
  * Endpoint to get pools data
  */
-app.get('/api/pools', (req, res) => {
-  res.json(poolsCache || {
+app.get('/api/pools', (c) => {
+  return c.json(poolsCache || {
     pools: [],
     timestamp: Date.now(),
     message: "No pools data available"
@@ -100,31 +105,31 @@ app.get('/api/pools', (req, res) => {
 /**
  * Endpoint to update pools data
  */
-app.post('/api/pools', (req, res) => {
-  const data = req.body;
+app.post('/api/pools', async (c) => {
+  const data = await c.req.json();
   
   poolsCache = {
     ...data,
     timestamp: Date.now()
   };
   
-  res.json({ success: true, message: "Pools data updated" });
+  return c.json({ success: true, message: "Pools data updated" });
 });
 
 /**
  * Endpoint to get a specific pool's data
  */
-app.get('/api/pools/:address', (req, res) => {
-  const { address } = req.params;
+app.get('/api/pools/:address', (c) => {
+  const { address } = c.req.param();
   
   if (poolsCache && poolsCache.pools) {
-    const pool = poolsCache.pools.find(p => p.address === address);
+    const pool = poolsCache.pools.find((p: any) => p.address === address);
     if (pool) {
-      return res.json(pool);
+      return c.json(pool);
     }
   }
   
-  res.json({
+  return c.json({
     address,
     timestamp: Date.now(),
     message: "No data available for this pool"
@@ -134,8 +139,8 @@ app.get('/api/pools/:address', (req, res) => {
 /**
  * Get all available data for Claude context
  */
-app.get('/api/claude-context', (req, res) => {
-  res.json({
+app.get('/api/claude-context', (c) => {
+  return c.json({
     market: marketDataCache,
     portfolio: portfolioCache,
     pools: poolsCache,
@@ -143,7 +148,13 @@ app.get('/api/claude-context', (req, res) => {
   });
 });
 
+// Get port from environment or use default
+const PORT = process.env.MCP_PORT ? parseInt(process.env.MCP_PORT) : 3003;
+
 // Start the server
-app.listen(PORT, () => {
-  console.log(`MCP Server running on port ${PORT}`);
+serve({
+  fetch: app.fetch,
+  port: PORT
 });
+
+console.log(`MCP Server running on port ${PORT}`);
