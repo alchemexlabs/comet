@@ -87,3 +87,27 @@ Example usage:
 ```
 bun run start-agent-cli start --strategy MicroPortfolio --micro-risk medium --micro-usdc 100 --micro-sol 1 --micro-weekend-safety true --claude-enabled true
 ```
+
+## Rate Limiting
+
+Comet implements automatic rate limiting for all external API calls to respect service quotas:
+
+### Default Rate Limits
+- **Helius RPC**: 50 requests per second
+- **SendTransaction**: 5 requests per second
+- **GetProgramAccounts**: 25 requests per second
+- **Helius Enhanced API**: 10 requests per second
+- **Birdeye API**: 10 requests per second
+- **Claude AI API**: 1 request per 10 seconds
+
+These limits can be customized through environment variables:
+```
+# Rate Limiting Configuration
+RATE_LIMIT_HELIUS_RPC=50
+RATE_LIMIT_HELIUS_SEND_TX=5
+RATE_LIMIT_HELIUS_PROGRAM_ACCTS=25
+RATE_LIMIT_HELIUS_API=10
+RATE_LIMIT_BIRDEYE_API=10
+RATE_LIMIT_CLAUDE_API=1
+RATE_LIMIT_CLAUDE_PERIOD=10000
+```

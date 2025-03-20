@@ -5,7 +5,7 @@
  * to optimize for fee generation and capital efficiency.
  */
 
-import { Connection, Keypair, PublicKey } from '@solana/web3.js';
+import { Keypair, PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { DLMM } from '../dlmm';
 import { StrategyType } from '../dlmm/types';
@@ -14,6 +14,7 @@ import { loadWalletFromKey, sleep } from './utils/helpers';
 import { getPriceFromBirdeye } from './utils/price';
 import { logger } from './utils/logger';
 import { ClaudeService } from './utils/claude';
+import RateLimitedConnection from './utils/connection';
 import MicroPortfolioAgent from './strategies/micro-portfolio';
 import { 
   initializeDatabase, 
@@ -26,7 +27,7 @@ import {
 } from './utils/database';
 
 export class Comet {
-  private connection: Connection;
+  private connection: RateLimitedConnection;
   private wallet: Keypair;
   private config: CometConfig;
   private dlmm: DLMM | null = null;
@@ -40,7 +41,7 @@ export class Comet {
 
   constructor(config: CometConfig) {
     this.config = config;
-    this.connection = new Connection(config.rpcUrl, 'confirmed');
+    this.connection = new RateLimitedConnection(config.rpcUrl, { commitment: 'confirmed' });
     this.wallet = loadWalletFromKey(config.walletKey);
     
     // Initialize Claude AI service if enabled
@@ -96,7 +97,7 @@ export class Comet {
       
       // Load the specified pool
       if (this.config.poolAddress) {
-        this.dlmm = await DLMM.create(this.connection, new PublicKey(this.config.poolAddress));
+        this.dlmm = await DLMM.create(this.connection.getConnection(), new PublicKey(this.config.poolAddress));
         logger.info(`Loaded DLMM pool: ${this.config.poolAddress}`);
         
         // Register agent in database
@@ -179,7 +180,7 @@ export class Comet {
 
       // Create the pool
       const transaction = DLMM.createCustomizablePermissionlessLbPair(
-        this.connection,
+        this.connection.getConnection(),
         new BN(binStep),
         new PublicKey(tokenX),
         new PublicKey(tokenY),

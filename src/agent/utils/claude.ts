@@ -6,6 +6,7 @@ import { Anthropic } from '@anthropic-ai/sdk';
 import { BN } from '@coral-xyz/anchor';
 import { StrategyType } from '../../dlmm/types';
 import { logger } from './logger';
+import { rateLimiter } from './rate-limiter';
 
 interface ClaudeConfig {
   apiKey: string;
@@ -74,18 +75,22 @@ export class ClaudeService {
       
       const prompt = this.buildMarketAnalysisPrompt(marketData);
       
-      const response = await this.client.messages.create({
-        model: this.config.model,
-        max_tokens: this.config.maxTokens,
-        temperature: this.config.temperature,
-        system: "You are a specialized financial AI for DeFi liquidity management. Your task is to analyze market data and provide optimal strategies for liquidity distribution in Meteora DLMM pools.",
-        messages: [
-          {
-            role: "user",
-            content: prompt
-          }
-        ],
-        response_format: { type: "json_object" }
+      // Apply rate limiting to Claude API calls
+      const response = await rateLimiter.limit('claude:api', async () => {
+        logger.debug('Making Claude API call for rebalance recommendation');
+        return this.client.messages.create({
+          model: this.config.model,
+          max_tokens: this.config.maxTokens,
+          temperature: this.config.temperature,
+          system: "You are a specialized financial AI for DeFi liquidity management. Your task is to analyze market data and provide optimal strategies for liquidity distribution in Meteora DLMM pools.",
+          messages: [
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          response_format: { type: "json_object" }
+        });
       });
       
       // Parse the response
@@ -131,18 +136,22 @@ export class ClaudeService {
       
       const prompt = this.buildStrategyParametersPrompt(strategyType, marketData, riskProfile);
       
-      const response = await this.client.messages.create({
-        model: this.config.model,
-        max_tokens: this.config.maxTokens,
-        temperature: this.config.temperature,
-        system: "You are a specialized financial AI for DeFi liquidity management. Your task is to generate optimal distribution parameters for liquidity in Meteora DLMM pools.",
-        messages: [
-          {
-            role: "user",
-            content: prompt
-          }
-        ],
-        response_format: { type: "json_object" }
+      // Apply rate limiting to Claude API calls
+      const response = await rateLimiter.limit('claude:api', async () => {
+        logger.debug('Making Claude API call for strategy parameters');
+        return this.client.messages.create({
+          model: this.config.model,
+          max_tokens: this.config.maxTokens,
+          temperature: this.config.temperature,
+          system: "You are a specialized financial AI for DeFi liquidity management. Your task is to generate optimal distribution parameters for liquidity in Meteora DLMM pools.",
+          messages: [
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          response_format: { type: "json_object" }
+        });
       });
       
       // Parse the response

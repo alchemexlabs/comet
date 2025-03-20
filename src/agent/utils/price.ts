@@ -6,6 +6,7 @@ import axios from 'axios';
 import { PublicKey } from '@solana/web3.js';
 import { logger } from './logger';
 import { retry } from './helpers';
+import { rateLimiter } from './rate-limiter';
 
 // Birdeye API base URL
 const BIRDEYE_API_URL = process.env.BIRDEYE_API_URL || 'https://public-api.birdeye.so';
@@ -47,22 +48,24 @@ export async function getPriceFromBirdeye(
       throw new Error('Birdeye API key not configured');
     }
     
-    // Make request to Birdeye API with retries and timeout
-    const response = await retry(
-      () => axios.get(
-        `${BIRDEYE_API_URL}/public/price?address=${mintAddress}`,
-        {
-          headers: {
-            'x-api-key': BIRDEYE_API_KEY,
-          },
-          timeout: 5000, // 5 second timeout
+    // Make request to Birdeye API with rate limiting, retries and timeout
+    const response = await rateLimiter.limit('birdeye:api', () => 
+      retry(
+        () => axios.get(
+          `${BIRDEYE_API_URL}/public/price?address=${mintAddress}`,
+          {
+            headers: {
+              'x-api-key': BIRDEYE_API_KEY,
+            },
+            timeout: 5000, // 5 second timeout
+          }
+        ),
+        3, // 3 retries
+        1000, // 1 second initial delay
+        (error, attempt) => {
+          logger.warn(`Birdeye API request attempt ${attempt} failed: ${error.message}`);
         }
-      ),
-      3, // 3 retries
-      1000, // 1 second initial delay
-      (error, attempt) => {
-        logger.warn(`Birdeye API request attempt ${attempt} failed: ${error.message}`);
-      }
+      )
     );
     
     // Extract price from response with validation
@@ -110,15 +113,18 @@ export async function getMultipleTokenPrices(
       mint instanceof PublicKey ? mint.toString() : mint
     ).join(',');
     
-    // Make request to Birdeye API
-    const response = await retry(() => axios.get(
-      `${BIRDEYE_API_URL}/defi/multiple_price?list_address=${addresses}`,
-      {
-        headers: {
-          'x-api-key': BIRDEYE_API_KEY,
-        },
-      }
-    ));
+    // Make request to Birdeye API with rate limiting
+    const response = await rateLimiter.limit('birdeye:api', () => 
+      retry(() => axios.get(
+        `${BIRDEYE_API_URL}/defi/multiple_price?list_address=${addresses}`,
+        {
+          headers: {
+            'x-api-key': BIRDEYE_API_KEY,
+          },
+          timeout: 5000, // 5 second timeout
+        }
+      ))
+    );
     
     // Process response
     const priceMap = new Map<string, number>();
