@@ -7,12 +7,14 @@ import { BN } from '@coral-xyz/anchor';
 import { StrategyType } from '../../dlmm/types';
 import { logger } from './logger';
 import { rateLimiter } from './rate-limiter';
+import axios from 'axios';
 
 interface ClaudeConfig {
   apiKey: string;
   model: string; // claude-3-haiku-20240307, claude-3-sonnet-20240229, claude-3-opus-20240229
   temperature?: number;
   maxTokens?: number;
+  mcpServer?: string;
 }
 
 interface MarketData {
@@ -57,6 +59,7 @@ export class ClaudeService {
       ...config,
       temperature: config.temperature || 0.1,
       maxTokens: config.maxTokens || 1024,
+      mcpServer: config.mcpServer || process.env.MCP_SERVER_URL || 'http://localhost:3003',
     };
     
     this.client = new Anthropic({
@@ -64,6 +67,10 @@ export class ClaudeService {
     });
     
     logger.info(`Initialized ClaudeAI service with model: ${config.model}`);
+    
+    if (this.config.mcpServer) {
+      logger.info(`MCP Server configured at: ${this.config.mcpServer}`);
+    }
   }
 
   /**
@@ -358,6 +365,46 @@ What insights can you provide about this strategy based on these results?`
     try {
       logger.info('Generating agent response for user query');
       
+      // Fetch additional context from MCP server if available
+      let mcpContext = '';
+      if (this.config.mcpServer) {
+        try {
+          const mcpResponse = await rateLimiter.limit('mcp:api', async () => {
+            return axios.get(`${this.config.mcpServer}/api/claude-context`);
+          });
+          
+          if (mcpResponse.data) {
+            logger.debug('Received context data from MCP server');
+            
+            // Format MCP context data
+            const mcpData = mcpResponse.data;
+            mcpContext = `
+## Additional Context from MCP Server
+Last Updated: ${new Date(mcpData.timestamp).toISOString()}
+
+${mcpData.portfolio && mcpData.portfolio.positions ? 
+  `### Portfolio Information
+Total Value: ${mcpData.portfolio.totalValue || 'N/A'}
+Active Positions: ${mcpData.portfolio.positions.length || 0}` : ''}
+
+${mcpData.pools && mcpData.pools.pools ? 
+  `### Active Pools
+Total Pools: ${mcpData.pools.pools.length || 0}` : ''}
+
+${Object.keys(mcpData.market || {}).length > 0 ? 
+  `### Market Data
+Available Pairs: ${Object.keys(mcpData.market).join(', ')}` : ''}
+`;
+          }
+        } catch (error) {
+          logger.warn('Failed to fetch context from MCP server', error);
+          // Continue without MCP context
+        }
+      }
+      
+      // Combine user-provided context with MCP context
+      const fullContext = contextInfo + (mcpContext ? '\n\n' + mcpContext : '');
+      
       // Apply rate limiting to Claude API calls
       const response = await rateLimiter.limit('claude:api', async () => {
         return this.client.messages.create({
@@ -389,7 +436,7 @@ Avoid making specific price predictions or promises of returns.`,
               role: "user",
               content: `Here's information about my current state:
 
-${contextInfo}
+${fullContext}
 
 My question is: ${userQuery}`
             }

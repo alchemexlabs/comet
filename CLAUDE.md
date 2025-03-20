@@ -101,6 +101,7 @@ Comet implements automatic rate limiting for all external API calls to respect s
 - **Birdeye API**: 10 requests per second
 - **Jupiter API**: 50 requests per second
 - **Claude AI API**: 1 request per 10 seconds
+- **MCP Server API**: 10 requests per second
 
 These limits can be customized through environment variables:
 ```
@@ -113,4 +114,22 @@ RATE_LIMIT_BIRDEYE_API=10
 RATE_LIMIT_JUPITER_API=50
 RATE_LIMIT_CLAUDE_API=1
 RATE_LIMIT_CLAUDE_PERIOD=10000
+RATE_LIMIT_MCP_API=10
+```
+
+## MCP Server
+
+Comet includes a Model Context Protocol (MCP) server that allows Claude to access additional context without consuming context tokens. The MCP server provides:
+
+- Market data for token pairs
+- Portfolio information
+- Pool analytics
+- Real-time metric data
+
+The MCP server runs on port 3003 by default and can be configured with:
+
+```
+# MCP Server Configuration
+MCP_PORT=3003
+MCP_SERVER_URL=http://localhost:3003  # URL for Claude to access MCP server
 ```

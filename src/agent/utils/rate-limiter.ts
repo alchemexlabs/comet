@@ -68,6 +68,12 @@ export const API_RATE_LIMITS: Record<string, RateLimitConfig> = {
     period: 1000 
   },
   
+  // MCP server rate limits
+  'mcp:api': { 
+    requests: parseInt(process.env.RATE_LIMIT_MCP_API || '10'), 
+    period: 1000 
+  },
+  
   // Default rate limiter for other services
   'default': { requests: 5, period: 1000 }
 };

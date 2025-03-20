@@ -20,6 +20,23 @@ services:
       retries: 5
     restart: always
 
+  # Comet MCP Server
+  comet-mcp:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    ports:
+      - "3003:3003"
+    environment:
+      NODE_ENV: production
+      MCP_PORT: 3003
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3003/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always
+
   # Comet Agent API Server
   comet-api:
     build:
@@ -40,9 +57,12 @@ services:
       BIRDEYE_API_URL: ${BIRDEYE_API_URL}
       COMET_API_PORT: 3001
       COMET_LOG_LEVEL: info
+      MCP_SERVER_URL: http://comet-mcp:3003
     depends_on:
       timescaledb:
         condition: service_healthy
+      comet-mcp:
+        condition: service_started
     restart: always
 
   # Comet Agent Runner
@@ -66,10 +86,13 @@ services:
       COMET_STRATEGY: ${COMET_STRATEGY:-Spot}
       COMET_AUTO_REBALANCE: ${COMET_AUTO_REBALANCE:-true}
       COMET_LOG_LEVEL: info
+      MCP_SERVER_URL: http://comet-mcp:3003
     depends_on:
       timescaledb:
         condition: service_healthy
       comet-api:
+        condition: service_started
+      comet-mcp:
         condition: service_started
     restart: always
 
