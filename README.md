@@ -7,6 +7,50 @@
 
 Comet is an autonomous trading agent for Solana's Meteora protocol, designed to create a perpetual money machine by providing concentrated liquidity on Meteora's DLMM (Dynamic Liquidity Market Maker) pools.
 
+## Architecture
+
+Comet is built with a microservices architecture that combines real-time liquidity management with advanced time-series analytics:
+
+```mermaid
+graph TD
+    subgraph "Comet System"
+        API[Comet API Service] --> Agent[Comet Agent]
+        Agent --> DLMM[Meteora DLMM SDK]
+        CLI[CLI Interface] --> API
+        API --> DB[(TimescaleDB)]
+        Agent --> DB
+    end
+
+    subgraph "External Services"
+        DLMM --> RPC[Helius RPC]
+        Agent --> Birdeye[Birdeye API]
+    end
+
+    subgraph "Solana Blockchain"
+        RPC <--> BC[Solana Blockchain]
+        DLMM <--> BC
+    end
+
+    subgraph "User Interface"
+        User[User] --> CLI
+        User --> APIEndpoints[REST API Endpoints]
+        APIEndpoints --> API
+    end
+
+    subgraph "Liquidity Management Flow"
+        direction LR
+        Monitor[Monitor Price] --> Analyze[Analyze Position]
+        Analyze --> Decision{Rebalance Needed?}
+        Decision -->|Yes| Rebalance[Rebalance Position]
+        Decision -->|No| Continue[Continue Monitoring]
+        Rebalance --> CollectFees[Collect Fees]
+        CollectFees --> Reinvest[Reinvest]
+        Continue --> TimeCheck{Time to collect fees?}
+        TimeCheck -->|Yes| CollectFees
+        TimeCheck -->|No| Monitor
+    end
+```
+
 ## Features
 
 - **Automated Pool Management**: Create and manage DLMM pools with specified parameters
@@ -15,6 +59,10 @@ Comet is an autonomous trading agent for Solana's Meteora protocol, designed to 
 - **Fee Collection**: Collect and reinvest trading fees to compound returns
 - **Multiple Strategies**: Support for Spot, BidAsk, and Curve liquidity distribution strategies
 - **REST API and CLI**: Manage your agents through an API or command line interface
+- **Time-Series Analytics**: Track historical performance with PostgreSQL and TimescaleDB
+- **Dockerized Deployment**: Run the entire system with a single docker-compose command
+- **Fault Tolerance**: Robust error handling and automatic recovery mechanisms
+- **Performance Monitoring**: Real-time monitoring of positions, fees, and rebalance events
 
 ## Installation
 
@@ -165,11 +213,118 @@ Collect fees:
 POST /pools/:poolAddress/collect-fees
 ```
 
-## Strategies
+## System Components
+
+### Comet API Service
+The API service provides RESTful endpoints for managing agents, pools, and viewing performance metrics. It's built with Hono, a lightweight, high-performance web framework.
+
+### Comet Agent
+The autonomous agent monitors pool conditions, rebalances positions, and collects fees. It runs as a standalone service and can be controlled via API or CLI.
+
+### TimescaleDB
+PostgreSQL with TimescaleDB extension provides high-performance time-series data storage for:
+- Historical price data
+- Pool metrics
+- Rebalance events
+- Fee collections
+- Performance analytics
+
+### Strategies
 
 - **Spot**: Distributes liquidity evenly around the active bin
 - **BidAsk**: Concentrates liquidity at the active bin and spreads out
 - **Curve**: Distributes liquidity in a normal distribution around the active bin
+
+## Data Model
+
+```mermaid
+erDiagram
+    AGENTS ||--o{ POOLS : manages
+    AGENTS ||--o{ REBALANCE_EVENTS : triggers
+    AGENTS ||--o{ FEE_COLLECTION_EVENTS : performs
+    POOLS ||--o{ POSITIONS : contains
+    POOLS ||--o{ POOL_METRICS : tracks
+
+    AGENTS {
+        int id
+        string pool_address
+        string wallet_address
+        string status
+        string strategy
+        int bin_range
+        boolean auto_rebalance
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    POOLS {
+        int id
+        string address
+        string token_x_address
+        string token_y_address
+        string token_x_symbol
+        string token_y_symbol
+        int bin_step
+        int active_bin_id
+        int fee_bps
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    POSITIONS {
+        int id
+        string address
+        string pool_address
+        string wallet_address
+        int min_bin_id
+        int max_bin_id
+        numeric liquidity_x
+        numeric liquidity_y
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    POOL_METRICS {
+        timestamp time
+        string pool_address
+        int active_bin_id
+        numeric current_price
+        numeric token_x_price_usd
+        numeric token_y_price_usd
+        numeric liquidity_x
+        numeric liquidity_y
+        numeric total_value_locked_usd
+        numeric volume_24h
+        numeric fees_24h
+    }
+
+    REBALANCE_EVENTS {
+        timestamp time
+        int agent_id
+        string pool_address
+        int old_active_bin
+        int new_active_bin
+        numeric old_price
+        numeric new_price
+        string transaction_hash
+        boolean success
+        string error_message
+    }
+
+    FEE_COLLECTION_EVENTS {
+        timestamp time
+        int agent_id
+        string pool_address
+        string position_address
+        numeric amount_x
+        numeric amount_y
+        numeric amount_x_usd
+        numeric amount_y_usd
+        string transaction_hash
+        boolean success
+        string error_message
+    }
+```
 
 ## Contributing
 
