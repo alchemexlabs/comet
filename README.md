@@ -7,6 +7,21 @@
 
 Comet is an autonomous trading agent for Solana's Meteora protocol, designed to create a perpetual money machine by providing concentrated liquidity on Meteora's DLMM (Dynamic Liquidity Market Maker) pools.
 
+## ⚠️ DISCLAIMER
+
+**USE AT YOUR OWN RISK. POTENTIAL LOSS OF FUNDS.**
+
+This software is provided "as is", without warranty of any kind, express or implied. By using Comet, you acknowledge and accept the risks associated with blockchain-based trading, automated market making, and decentralized finance in general.
+
+- Comet is experimental software in active development
+- Strategies implemented may not be profitable in all market conditions
+- Smart contract bugs, exploits, or failures could result in loss of funds
+- The authors are not liable for any financial losses resulting from use of this software
+- Test with minimal funds before committing significant capital
+- Never use funds you cannot afford to lose
+
+By using Comet, you take full responsibility for all outcomes, including potential partial or complete loss of funds.
+
 ## Architecture
 
 Comet is built with a microservices architecture that combines real-time liquidity management with advanced time-series analytics:

@@ -17,7 +17,8 @@
     "example": "dotenv -e .env bun src/examples/example.ts",
     "start-server": "bun src/server/index.ts",
     "start-agent": "bun src/agent/server.ts",
-    "start-agent-cli": "bun src/agent/cli.ts"
+    "start-agent-cli": "bun src/agent/cli.ts",
+    "test-real-money": "bun -r dotenv/config src/examples/test_real_money.ts"
   },
   "devDependencies": {
     "@babel/preset-env": "^7.22.5",
@@ -35,7 +36,7 @@
     "typescript": "^5.0.4"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.18.0",
+    "@anthropic-ai/sdk": "^0.39.0",
     "@coral-xyz/anchor": "^0.28.0",
     "@coral-xyz/borsh": "^0.28.0",
     "@hono/node-server": "^1.8.2",

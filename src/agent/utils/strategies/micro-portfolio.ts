@@ -228,7 +228,25 @@ export class MicroPortfolioStrategy {
         solUsdcAllocation.tokenA.amount = this.portfolio.sol.muln(60).divn(100);
         solUsdcAllocation.tokenB.amount = this.portfolio.usdc.muln(60).divn(100);
         
-        // TODO: Add logic to find and allocate to a medium-risk token pair
+        // Add secondary allocation for MSOL/USDC (liquid staking derivative)
+        const msolUsdcAllocation: PoolAllocation = {
+          tokenA: {
+            mint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So', // MSOL mint
+            symbol: 'MSOL',
+            amount: this.portfolio.sol.muln(20).divn(100) // 20% of SOL allocation
+          },
+          tokenB: {
+            mint: this.config.usdcMint,
+            symbol: 'USDC',
+            amount: this.portfolio.usdc.muln(20).divn(100) // 20% of USDC allocation
+          },
+          strategy: StrategyType.Spot,
+          binStep: 5, // Tighter bin step as MSOL/SOL has lower volatility
+          baseFee: 1, // 0.01%
+          maxBinRange: 5
+        };
+        
+        allocations.push(msolUsdcAllocation);
         break;
         
       case 'high':
@@ -236,7 +254,46 @@ export class MicroPortfolioStrategy {
         solUsdcAllocation.tokenA.amount = this.portfolio.sol.muln(40).divn(100);
         solUsdcAllocation.tokenB.amount = this.portfolio.usdc.muln(40).divn(100);
         
-        // TODO: Add logic to find and allocate to higher-risk token pairs
+        // Add higher-risk allocations
+        
+        // MSOL/USDC allocation (20%)
+        const msolAllocation: PoolAllocation = {
+          tokenA: {
+            mint: 'mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So', // MSOL mint
+            symbol: 'MSOL',
+            amount: this.portfolio.sol.muln(20).divn(100) // 20% of SOL allocation
+          },
+          tokenB: {
+            mint: this.config.usdcMint,
+            symbol: 'USDC',
+            amount: this.portfolio.usdc.muln(20).divn(100) // 20% of USDC allocation
+          },
+          strategy: StrategyType.Spot,
+          binStep: 5,
+          baseFee: 1, // 0.01%
+          maxBinRange: 5
+        };
+        
+        // BONK/USDC allocation (20% of USDC only)
+        const bonkAllocation: PoolAllocation = {
+          tokenA: {
+            mint: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263', // BONK mint
+            symbol: 'BONK',
+            amount: new BN(0) // No direct SOL allocation to BONK
+          },
+          tokenB: {
+            mint: this.config.usdcMint,
+            symbol: 'USDC',
+            amount: this.portfolio.usdc.muln(20).divn(100) // 20% of USDC allocation
+          },
+          strategy: StrategyType.BidAsk, // Use BidAsk for higher volatility
+          binStep: 25, // Wider bins for high volatility
+          baseFee: 2, // 0.02% higher fee for higher volatility
+          maxBinRange: 20 // Wider range for higher volatility
+        };
+        
+        allocations.push(msolAllocation);
+        allocations.push(bonkAllocation);
         break;
     }
     
