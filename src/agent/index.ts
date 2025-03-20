@@ -13,6 +13,15 @@ import { CometConfig } from './types';
 import { loadWalletFromKey, sleep } from './utils/helpers';
 import { getPriceFromBirdeye } from './utils/price';
 import { logger } from './utils/logger';
+import { 
+  initializeDatabase, 
+  registerAgent, 
+  updateAgentStatus, 
+  registerPool, 
+  recordPoolMetrics, 
+  recordRebalanceEvent,
+  recordFeeCollectionEvent
+} from './utils/database';
 
 export class Comet {
   private connection: Connection;
@@ -21,6 +30,7 @@ export class Comet {
   private dlmm: DLMM | null = null;
   private isRunning = false;
   private lastRebalanceTime = 0;
+  private agentId: number | null = null;
 
   constructor(config: CometConfig) {
     this.config = config;
@@ -29,15 +39,54 @@ export class Comet {
   }
 
   /**
-   * Initialize the agent by loading the DLMM pool
+   * Initialize the agent by loading the DLMM pool and database
    */
   async initialize(): Promise<void> {
     try {
       logger.info('Initializing Comet agent...');
+      
+      // Initialize database connection
+      initializeDatabase();
+      
       // Load the specified pool
       if (this.config.poolAddress) {
         this.dlmm = await DLMM.create(this.connection, new PublicKey(this.config.poolAddress));
         logger.info(`Loaded DLMM pool: ${this.config.poolAddress}`);
+        
+        // Register agent in database
+        this.agentId = await registerAgent(
+          this.config.poolAddress,
+          this.wallet.publicKey.toString(),
+          this.config.strategy || 'Spot',
+          this.config.binRange || 10,
+          this.config.autoRebalance !== undefined ? this.config.autoRebalance : true
+        );
+        
+        // Register pool in database
+        const poolInfo = this.dlmm.lbPair;
+        await registerPool(
+          this.config.poolAddress,
+          poolInfo.tokenX.mint.toString(),
+          poolInfo.tokenY.mint.toString(),
+          poolInfo.binStep.toNumber(),
+          poolInfo.activeId.toNumber(),
+          poolInfo.feeParameter.toNumber()
+        );
+        
+        // Record initial pool metrics
+        const activeBin = await this.dlmm.getActiveBin();
+        const tokenXPrice = await getPriceFromBirdeye(poolInfo.tokenX.mint.toString(), 1);
+        const tokenYPrice = await getPriceFromBirdeye(poolInfo.tokenY.mint.toString(), 1);
+        
+        await recordPoolMetrics(
+          this.config.poolAddress,
+          activeBin.binId,
+          parseFloat(activeBin.price),
+          tokenXPrice,
+          tokenYPrice,
+          poolInfo.reserveX.toString(),
+          poolInfo.reserveY.toString()
+        );
       } else {
         logger.error('No pool address specified in config');
         throw new Error('No pool address specified in config');
@@ -149,13 +198,18 @@ export class Comet {
    * Rebalance liquidity positions based on current price
    */
   async rebalance(): Promise<void> {
+    if (!this.dlmm || !this.agentId) {
+      throw new Error('DLMM pool not initialized');
+    }
+
+    logger.info('Rebalancing liquidity positions...');
+    let oldActiveBin: number;
+    let oldPrice: number;
+    let transactionHash: string | undefined;
+    let success = false;
+    let errorMessage: string | undefined;
+
     try {
-      if (!this.dlmm) {
-        throw new Error('DLMM pool not initialized');
-      }
-
-      logger.info('Rebalancing liquidity positions...');
-
       // Get current positions
       const { userPositions } = await this.dlmm.getPositionsByUserAndLbPair(this.wallet.publicKey);
       
@@ -164,8 +218,10 @@ export class Comet {
         return;
       }
 
-      // Get active bin
-      const activeBin = await this.dlmm.getActiveBin();
+      // Get old active bin before rebalance
+      const oldActiveBinInfo = await this.dlmm.getActiveBin();
+      oldActiveBin = oldActiveBinInfo.binId;
+      oldPrice = parseFloat(oldActiveBinInfo.price);
       
       // Check if rebalance is needed based on active bin and position bins
       // Implementation needed
@@ -177,9 +233,69 @@ export class Comet {
       // Implementation needed
 
       this.lastRebalanceTime = Date.now();
+      
+      // Get new active bin after rebalance
+      const newActiveBinInfo = await this.dlmm.getActiveBin();
+      const newActiveBin = newActiveBinInfo.binId;
+      const newPrice = parseFloat(newActiveBinInfo.price);
+      
+      // Set success flag
+      success = true;
+      
       logger.info('Rebalance completed successfully');
+      
+      // Record rebalance event in database
+      await recordRebalanceEvent(
+        this.agentId,
+        this.config.poolAddress,
+        oldActiveBin,
+        newActiveBin,
+        oldPrice,
+        newPrice,
+        transactionHash,
+        success
+      );
+      
+      // Update pool metrics after rebalance
+      if (this.dlmm) {
+        const poolInfo = this.dlmm.lbPair;
+        const tokenXPrice = await getPriceFromBirdeye(poolInfo.tokenX.mint.toString(), 1);
+        const tokenYPrice = await getPriceFromBirdeye(poolInfo.tokenY.mint.toString(), 1);
+        
+        await recordPoolMetrics(
+          this.config.poolAddress,
+          newActiveBin,
+          newPrice,
+          tokenXPrice,
+          tokenYPrice,
+          poolInfo.reserveX.toString(),
+          poolInfo.reserveY.toString()
+        );
+      }
     } catch (error) {
       logger.error('Failed to rebalance positions', error);
+      
+      // Record failed rebalance event if we have the old bin info
+      if (this.agentId && oldActiveBin !== undefined && oldPrice !== undefined) {
+        errorMessage = error.message || 'Unknown error';
+        
+        try {
+          await recordRebalanceEvent(
+            this.agentId,
+            this.config.poolAddress,
+            oldActiveBin,
+            oldActiveBin, // Same as old since rebalance failed
+            oldPrice,
+            oldPrice, // Same as old since rebalance failed
+            undefined,
+            false,
+            errorMessage
+          );
+        } catch (dbError) {
+          logger.error('Failed to record rebalance failure in database:', dbError);
+        }
+      }
+      
       throw error;
     }
   }
@@ -188,13 +304,14 @@ export class Comet {
    * Collect fees from all positions
    */
   async collectFees(): Promise<void> {
+    if (!this.dlmm || !this.agentId) {
+      throw new Error('DLMM pool not initialized');
+    }
+
+    logger.info('Collecting fees from positions...');
+    let transactionHash: string | undefined;
+
     try {
-      if (!this.dlmm) {
-        throw new Error('DLMM pool not initialized');
-      }
-
-      logger.info('Collecting fees from positions...');
-
       // Get current positions
       const { userPositions } = await this.dlmm.getPositionsByUserAndLbPair(this.wallet.publicKey);
       
@@ -202,6 +319,22 @@ export class Comet {
         logger.info('No positions to collect fees from');
         return;
       }
+
+      // Get claimable fees before claiming
+      const claimableFees = await Promise.all(
+        userPositions.map(async (position) => {
+          try {
+            return await DLMM.getClaimableSwapFee(
+              this.connection,
+              position.publicKey,
+              this.wallet.publicKey
+            );
+          } catch (error) {
+            logger.warn(`Failed to get claimable fees for position ${position.publicKey.toString()}:`, error);
+            return null;
+          }
+        })
+      );
 
       // Claim swap fees
       const claimFeeTxs = await this.dlmm.claimAllSwapFee({
@@ -211,10 +344,77 @@ export class Comet {
 
       // Execute transaction(s)
       // Implementation needed for transaction signing and sending
+      
+      // For now, let's assume a successful transaction
+      transactionHash = 'PLACEHOLDER_TX_HASH';
+      
+      // Get token prices for USD conversion
+      const poolInfo = this.dlmm.lbPair;
+      const tokenXPrice = await getPriceFromBirdeye(poolInfo.tokenX.mint.toString(), 1);
+      const tokenYPrice = await getPriceFromBirdeye(poolInfo.tokenY.mint.toString(), 1);
+      
+      // Record fee collection events
+      for (let i = 0; i < userPositions.length; i++) {
+        const position = userPositions[i];
+        const fees = claimableFees[i];
+        
+        if (fees) {
+          const amountX = fees.x.toString();
+          const amountY = fees.y.toString();
+          const amountXUsd = parseFloat(fees.x.toString()) * tokenXPrice;
+          const amountYUsd = parseFloat(fees.y.toString()) * tokenYPrice;
+          
+          await recordFeeCollectionEvent(
+            this.agentId,
+            this.config.poolAddress,
+            position.publicKey.toString(),
+            amountX,
+            amountY,
+            amountXUsd,
+            amountYUsd,
+            transactionHash,
+            true
+          );
+        }
+      }
 
       logger.info('Fees collected successfully');
+      
+      // Update pool metrics after fee collection
+      const activeBin = await this.dlmm.getActiveBin();
+      
+      await recordPoolMetrics(
+        this.config.poolAddress,
+        activeBin.binId,
+        parseFloat(activeBin.price),
+        tokenXPrice,
+        tokenYPrice,
+        poolInfo.reserveX.toString(),
+        poolInfo.reserveY.toString()
+      );
     } catch (error) {
       logger.error('Failed to collect fees', error);
+      
+      // Record failed fee collection if we have the agent ID
+      if (this.agentId) {
+        try {
+          await recordFeeCollectionEvent(
+            this.agentId,
+            this.config.poolAddress,
+            'ALL_POSITIONS', // Generic identifier for failed collections
+            '0',
+            '0',
+            0,
+            0,
+            undefined,
+            false,
+            error.message
+          );
+        } catch (dbError) {
+          logger.error('Failed to record fee collection failure in database:', dbError);
+        }
+      }
+      
       throw error;
     }
   }
@@ -287,8 +487,18 @@ export class Comet {
   /**
    * Stop the agent
    */
-  stop(): void {
+  async stop(): Promise<void> {
     this.isRunning = false;
+    
+    // Update agent status in database
+    if (this.agentId && this.config.poolAddress) {
+      try {
+        await updateAgentStatus(this.config.poolAddress, 'stopped');
+      } catch (error) {
+        logger.error('Failed to update agent status in database:', error);
+      }
+    }
+    
     logger.info('Comet agent stopped');
   }
 

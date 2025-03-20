@@ -18,6 +18,8 @@ Comet is an autonomous trading agent for Solana's Meteora protocol, designed to 
 
 ## Installation
 
+### Local Development
+
 ```bash
 # Install dependencies
 bun install
@@ -25,6 +27,29 @@ bun install
 # Build the project
 bun run build
 ```
+
+### Docker Setup
+
+The application is fully containerized with Docker, including a PostgreSQL database with TimescaleDB extension for time-series data:
+
+```bash
+# Build and start all services
+docker-compose up -d
+
+# Build and start specific services
+docker-compose up -d timescaledb comet-api
+
+# View logs
+docker-compose logs -f
+
+# Stop all services
+docker-compose down
+```
+
+The Docker setup includes:
+- **TimescaleDB**: PostgreSQL with TimescaleDB extension for time-series data
+- **Comet API**: REST API for managing agents and pools
+- **Comet Agent**: Background service that manages liquidity positions
 
 ## Configuration
 

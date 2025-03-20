@@ -4,6 +4,7 @@
 
 import { serve } from '@hono/node-server';
 import { logger } from './utils/logger';
+import { shutdownDatabase } from './utils/database';
 import api from './api';
 
 // Get port from environment or use default
@@ -52,8 +53,17 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Handle graceful shutdown
-process.on('SIGINT', () => {
-  logger.info('Shutting down Comet Agent API server...');
+async function gracefulShutdown(signal: string) {
+  logger.info(`Shutting down Comet Agent API server (${signal})...`);
+  
+  // Close database connections first
+  try {
+    await shutdownDatabase();
+  } catch (error) {
+    logger.error('Error shutting down database:', error);
+  }
+  
+  // Then close the server
   if (server && server.close) {
     server.close(() => {
       logger.info('Server closed gracefully');
@@ -68,22 +78,7 @@ process.on('SIGINT', () => {
   } else {
     process.exit(0);
   }
-});
+}
 
-process.on('SIGTERM', () => {
-  logger.info('Shutting down Comet Agent API server...');
-  if (server && server.close) {
-    server.close(() => {
-      logger.info('Server closed gracefully');
-      process.exit(0);
-    });
-    
-    // Force close after timeout
-    setTimeout(() => {
-      logger.warn('Forcing server shutdown after timeout');
-      process.exit(1);
-    }, 5000);
-  } else {
-    process.exit(0);
-  }
-});
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));

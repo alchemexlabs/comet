@@ -13,6 +13,10 @@ import { StrategyType } from '../dlmm/types';
 import { Comet } from './index';
 import { CometConfig, AgentStatus } from './types';
 import { parseEnvConfig, retry } from './utils/helpers';
+import { 
+  initializeDatabase, 
+  getAgentPerformance 
+} from './utils/database';
 
 // Create Hono app
 const app = new Hono();
@@ -25,6 +29,9 @@ const agents = new Map<string, Comet>();
 
 // Parse environment config
 const envConfig = parseEnvConfig();
+
+// Initialize database
+initializeDatabase();
 
 // Helper to get agent by pool address or create new one
 async function getOrCreateAgent(poolAddress: string): Promise<Comet> {
@@ -203,28 +210,73 @@ app.post('/agents/stop', async (c) => {
   }
 });
 
-// Get agent status
+// Get agent status and performance metrics
 app.get('/agents/:poolAddress/status', async (c) => {
   try {
     const poolAddress = c.req.param('poolAddress');
-    const agent = agents.get(poolAddress);
     
-    if (!agent) {
-      return c.json({
-        poolAddress,
-        status: AgentStatus.Stopped
-      });
+    // Validate pool address
+    try {
+      new PublicKey(poolAddress);
+    } catch (e) {
+      return c.json({ 
+        status: 'error',
+        error: 'Invalid pool address format' 
+      }, 400);
     }
     
-    // In a real implementation, you would get more detailed status from the agent
+    const agent = agents.get(poolAddress);
+    let agentStatus = AgentStatus.Stopped;
+    
+    if (agent) {
+      agentStatus = AgentStatus.Running;
+    }
+    
+    // Get agent ID from database
+    const client = await import('pg').then(module => module.Pool.connect());
+    let agentId = null;
+    
+    try {
+      const result = await client.query(
+        'SELECT id FROM agents WHERE pool_address = $1',
+        [poolAddress]
+      );
+      
+      if (result.rows.length > 0) {
+        agentId = result.rows[0].id;
+      }
+    } finally {
+      client.release();
+    }
+    
+    // Get pool metrics from database
+    let poolMetrics = null;
+    if (agentId) {
+      try {
+        // Get metrics for the last 24 hours
+        const now = new Date();
+        const dayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        
+        const performance = await getAgentPerformance(agentId, dayAgo, now);
+        poolMetrics = performance;
+      } catch (metricsError) {
+        logger.error('Failed to get agent performance metrics:', metricsError);
+        // Continue without metrics
+      }
+    }
+    
     return c.json({
       poolAddress,
-      status: AgentStatus.Running,
-      // Additional status details would be fetched from agent
+      status: agentStatus,
+      metrics: poolMetrics,
+      lastUpdated: new Date().toISOString()
     });
   } catch (error) {
     logger.error('Failed to get agent status:', error);
-    return c.json({ error: error.message }, 500);
+    return c.json({ 
+      status: 'error',
+      error: `Failed to get agent status: ${error.message}` 
+    }, 500);
   }
 });
 

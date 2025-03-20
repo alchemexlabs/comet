@@ -49,7 +49,8 @@
     "decimal.js": "^10.4.2",
     "express": "^4.19.2",
     "gaussian": "^1.3.0",
-    "hono": "^4.1.5"
+    "hono": "^4.1.5",
+    "pg": "^8.11.3"
   },
   "keywords": [],
   "author": "McSam",

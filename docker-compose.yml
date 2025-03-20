@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with TimescaleDB
+  timescaledb:
+    image: timescale/timescaledb:latest-pg14
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: comet
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  # Comet Agent API Server
+  comet-api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      NODE_ENV: production
+      POSTGRES_HOST: timescaledb
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: comet
+      RPC_URL: ${RPC_URL}
+      HELIUS_API_KEY: ${HELIUS_API_KEY}
+      BIRDEYE_API_KEY: ${BIRDEYE_API_KEY}
+      BIRDEYE_API_URL: ${BIRDEYE_API_URL}
+      COMET_API_PORT: 3001
+      COMET_LOG_LEVEL: info
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: always
+
+  # Comet Agent Runner
+  comet-agent:
+    build:
+      context: .
+      dockerfile: docker/agent/Dockerfile
+    environment:
+      NODE_ENV: production
+      POSTGRES_HOST: timescaledb
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: comet
+      RPC_URL: ${RPC_URL}
+      HELIUS_API_KEY: ${HELIUS_API_KEY}
+      BIRDEYE_API_KEY: ${BIRDEYE_API_KEY}
+      BIRDEYE_API_URL: ${BIRDEYE_API_URL}
+      COMET_WALLET_KEY: ${COMET_WALLET_KEY}
+      COMET_POOL_ADDRESS: ${COMET_POOL_ADDRESS}
+      COMET_STRATEGY: ${COMET_STRATEGY:-Spot}
+      COMET_AUTO_REBALANCE: ${COMET_AUTO_REBALANCE:-true}
+      COMET_LOG_LEVEL: info
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      comet-api:
+        condition: service_started
+    restart: always
+
+volumes:
+  timescaledb_data:
+    driver: local
