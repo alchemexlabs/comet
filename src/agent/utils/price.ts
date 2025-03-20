@@ -498,6 +498,181 @@ export async function getTokenTopHolders(
 }
 
 /**
+ * Get newly listed tokens from Birdeye API (Starter Plan)
+ * 
+ * @param limit - Number of new tokens to return (max 100)
+ * @param startTime - Optional start time in milliseconds
+ * @param endTime - Optional end time in milliseconds
+ * @returns Array of newly listed tokens
+ */
+export async function getNewlyListedTokens(
+  limit: number = 20,
+  startTime?: number,
+  endTime?: number
+): Promise<any[]> {
+  try {
+    // Build query parameters
+    const params = new URLSearchParams();
+    params.append('limit', Math.min(limit, 100).toString());
+    
+    if (startTime) {
+      params.append('startTime', startTime.toString());
+    }
+    
+    if (endTime) {
+      params.append('endTime', endTime.toString());
+    }
+    
+    // Make request to Birdeye API with rate limiting
+    const response = await rateLimiter.limit('birdeye:api', () => 
+      retry(() => axios.get(
+        `${BIRDEYE_API_URL}/tokens/new_listing?${params.toString()}`,
+        {
+          headers: {
+            'x-api-key': BIRDEYE_API_KEY,
+          },
+          timeout: 10000, // 10 second timeout for new listings
+        }
+      ))
+    );
+    
+    return response.data?.data || [];
+  } catch (error) {
+    logger.error(`Failed to get newly listed tokens: ${error.message}`);
+    throw new Error(`Failed to get newly listed tokens: ${error.message}`);
+  }
+}
+
+/**
+ * Analyze new token potential
+ * 
+ * Evaluates newly listed tokens based on multiple factors including:
+ * - Initial liquidity
+ * - Trading volume in first hour
+ * - Holder growth rate
+ * - Metadata completion and quality
+ * - Social signals
+ * - Distribution among holders
+ * 
+ * @param tokenMint - Token mint address
+ * @returns Analysis results with potential score (0-100) and factors
+ */
+export async function analyzeNewTokenPotential(
+  tokenMint: string | PublicKey
+): Promise<{
+  score: number;
+  liquidity: number;
+  volume: number;
+  holderGrowth: number;
+  metadataQuality: number;
+  socialSignals: number;
+  distribution: number;
+  recommendation: string;
+}> {
+  try {
+    const mintAddress = tokenMint instanceof PublicKey ? tokenMint.toString() : tokenMint;
+    
+    // Get token information
+    const tokenInfo = await getTokenInfo(mintAddress);
+    const marketData = await getTokenMarketData(mintAddress);
+    
+    // Get token holders
+    const holders = await getTokenTopHolders(mintAddress, 10);
+    
+    // Get OHLCV data (1 hour candles for the last 6 hours if available)
+    const ohlcvData = await getTokenOHLCV(mintAddress, '1H', 6);
+    
+    // Get recent trades
+    const trades = await getTokenTrades(mintAddress, 50);
+    
+    // Calculate metrics
+    
+    // 1. Liquidity assessment (0-20 points)
+    const liquidity = Math.min(
+      20, 
+      ((marketData.liquidity || 0) / 10000) * 20
+    );
+    
+    // 2. Trading volume in first hours (0-25 points)
+    let volume = 0;
+    if (trades.length > 0) {
+      const tradeVolume = trades.reduce((sum, trade) => sum + (trade.volume || 0), 0);
+      volume = Math.min(25, (tradeVolume / 5000) * 25);
+    }
+    
+    // 3. Holder growth and distribution (0-20 points)
+    let holderGrowth = 0;
+    let distribution = 0;
+    
+    if (holders.length > 0) {
+      // More holders is better
+      holderGrowth = Math.min(10, (holders.length / 50) * 10);
+      
+      // Calculate distribution - lower concentration is better
+      const topHolderPercentage = holders[0]?.percentage || 0;
+      distribution = Math.min(10, (1 - topHolderPercentage / 100) * 10);
+    }
+    
+    // 4. Metadata quality (0-15 points)
+    let metadataQuality = 0;
+    if (tokenInfo) {
+      // Check for name, symbol, description, website, etc.
+      metadataQuality += tokenInfo.name ? 3 : 0;
+      metadataQuality += tokenInfo.symbol ? 2 : 0;
+      metadataQuality += tokenInfo.description ? 3 : 0;
+      metadataQuality += tokenInfo.website ? 3 : 0;
+      metadataQuality += tokenInfo.twitter ? 2 : 0;
+      metadataQuality += tokenInfo.telegram ? 2 : 0;
+    }
+    metadataQuality = Math.min(15, metadataQuality);
+    
+    // 5. Social signals (0-20 points)
+    let socialSignals = 0;
+    // This would ideally check Twitter/Telegram activity
+    // For now, use a placeholder based on metadata presence
+    socialSignals = Math.min(20, metadataQuality * 1.33);
+    
+    // Calculate overall score (0-100)
+    const score = liquidity + volume + holderGrowth + distribution + metadataQuality + socialSignals;
+    
+    // Generate recommendation
+    let recommendation = 'neutral';
+    if (score >= 80) {
+      recommendation = 'high potential';
+    } else if (score >= 60) {
+      recommendation = 'moderate potential';
+    } else if (score >= 40) {
+      recommendation = 'monitor';
+    } else {
+      recommendation = 'low potential';
+    }
+    
+    return {
+      score,
+      liquidity,
+      volume,
+      holderGrowth,
+      metadataQuality,
+      socialSignals,
+      distribution,
+      recommendation
+    };
+  } catch (error) {
+    logger.error(`Failed to analyze new token potential: ${error.message}`);
+    return {
+      score: 0,
+      liquidity: 0,
+      volume: 0,
+      holderGrowth: 0,
+      metadataQuality: 0,
+      socialSignals: 0,
+      distribution: 0,
+      recommendation: 'failed to analyze'
+    };
+  }
+}
+
+/**
  * Calculate price impact for a given amount and pool
  * 
  * @param inputAmount - Amount of tokens to swap
